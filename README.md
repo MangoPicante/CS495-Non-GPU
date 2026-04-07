@@ -1,8 +1,9 @@
-# CS495-Lottery-Ticket
+# CS495-Non-GPU
 
-📌 The Lottery Ticket Hypothesis: Finding Sparse Trainable Networks
+📌 Non-GPU LLM Training: Efficient Transformer Training with BitNet
 
-📖 Efficient Neural Network Training Without Full Dense Optimization
+📖 This project investigates how to make LLM training economically viable without specialized hardware
+
 🎯 Objectives
 
 🧰 Tools / Technologies (e.g., Python, PyTorch, SQL, etc.)
