@@ -1,6 +1,6 @@
-PYTHON     := python3.13
+PYTHON     := py -3.13
 VENV_DIR   := .venv
-VENV_BIN   := $(VENV_DIR)/bin
+VENV_BIN   := $(VENV_DIR)/Scripts
 ACTIVATE   := . $(VENV_BIN)/activate
 
 .DEFAULT_GOAL := help
@@ -27,19 +27,19 @@ help:
 
 $(VENV_DIR):
 	$(PYTHON) -m venv $(VENV_DIR)
-	$(VENV_BIN)/pip install --upgrade pip
+	$(VENV_BIN)/python -m pip install --upgrade pip
 
 venv: $(VENV_DIR)
 
 # Tell Poetry to use the .venv we created (in-project venv)
 install: $(VENV_DIR)
 	poetry config virtualenvs.in-project true
-	poetry env use $(VENV_DIR)/bin/python
+	poetry env use $(VENV_DIR)/Scripts/python.exe
 	poetry install --only main
 
 install-dev: $(VENV_DIR)
 	poetry config virtualenvs.in-project true
-	poetry env use $(VENV_DIR)/bin/python
+	poetry env use $(VENV_DIR)/Scripts/python.exe
 	poetry install
 
 update: $(VENV_DIR)
