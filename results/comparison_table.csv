@@ -1,7 +1,0 @@
-model,type,params_b,quantization,mmlu,arc_challenge,hellaswag,winogrande,truthfulqa_mc2,source
-BitNet b1.58 2B4T,bitnet,2.0,1.58-bit,,,,,,local — fill after running lm-evaluation-harness
-LLaMA 3.2 1B,fp16,1.0,FP16,49.3,36.4,59.2,60.0,,arXiv:2504.12285 Table 2 (verify against paper)
-Gemma-3 1B,fp16,1.0,FP16,52.5,38.9,62.1,61.0,,arXiv:2504.12285 Table 2 (verify against paper)
-Qwen2.5 1.5B,fp16,1.5,FP16,60.9,43.3,66.4,64.2,,arXiv:2504.12285 Table 2 (verify against paper)
-SmolLM2 1.7B,fp16,1.7,FP16,50.7,40.3,66.6,65.9,,arXiv:2504.12285 Table 2 (verify against paper)
-MiniCPM 2B,fp16,2.0,FP16,53.7,43.1,67.0,65.6,,arXiv:2504.12285 Table 2 (verify against paper)

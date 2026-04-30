@@ -1,1 +1,0 @@
-timestamp,model,threads,n_predict,prompt_tokens,generated_tokens,load_time_ms,prompt_eval_ms,prompt_ms_per_token,eval_ms,eval_ms_per_token,tokens_per_sec,peak_memory_mb,energy_kwh,total_time_ms,notes
