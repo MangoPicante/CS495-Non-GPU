@@ -5,7 +5,7 @@ ACTIVATE   := . $(VENV_BIN)/activate
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv install install-dev update test lint format type-check check clean nuke run
+.PHONY: help venv install install-dev update test lint format type-check check clean nuke run benchmark plots
 
 help:
 	@echo "Usage: make <target>"
@@ -22,6 +22,8 @@ help:
 	@echo "  clean        Remove __pycache__, .pytest_cache, *.pyc"
 	@echo "  nuke         Remove .venv and clean"
 	@echo "  run          Run the package entry point"
+	@echo "  benchmark    Run inference benchmarks (set BINARY= and MODEL=)"
+	@echo "  plots        Generate comparison plots from results/"
 
 # ── Environment ────────────────────────────────────────────────────────────────
 
@@ -77,3 +79,18 @@ nuke: clean
 
 run:
 	poetry run python -m cs495_non_gpu
+
+# ── Benchmarks ─────────────────────────────────────────────────────────────────
+
+BINARY ?= build/bin/llama-cli
+MODEL  ?= models/BitNet-b1.58-2B4T/ggml-model-i2_s.gguf
+THREADS ?= 4
+RUNS ?= 5
+
+benchmark:
+	poetry run python scripts/metrics_tracker.py \
+		--binary $(BINARY) --model $(MODEL) \
+		--threads $(THREADS) --runs $(RUNS)
+
+plots:
+	poetry run python scripts/compare_runs.py
