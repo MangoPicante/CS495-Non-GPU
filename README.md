@@ -55,80 +55,143 @@ Modern LLM training demands expensive GPU clusters, limiting access and driving 
 
 ## 🧰 Tools & Technologies
 
-- **Languages**: Python
-- **ML Framework**: PyTorch
-- **Model Reference**: [microsoft/BitNet](https://github.com/microsoft/BitNet)
+- **Languages**: Python 3.11+
+- **Inference Runtime**: [microsoft/BitNet (bitnet.cpp)](https://github.com/microsoft/BitNet)
 - **Evaluation**: [EleutherAI lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)
-- **Experiment Tracking**: TensorBoard / Weights & Biases
+- **Memory Profiling**: psutil
 - **Carbon Tracking**: CodeCarbon
-- **Data**: WikiText-2, RedPajama (standard NLP benchmarks)
+- **Model**: BitNet b1.58 2B4T GGUF (`microsoft/bitnet-b1.58-2B-4T-gguf`)
 
 ---
 
-## 🚀 How to Run
+## 🚀 Setup
+
+### Prerequisites
+
+- Python 3.11+
+- CMake 3.22+
+- Clang 18+ / Visual Studio 2022 with C++ workload (Windows)
+- `huggingface-cli` (`pip install huggingface_hub[cli]`)
+- ~3 GB free disk space for the model
+
+### 1 — Clone this repo
 
 ```bash
-# 1. Clone and install
-git clone <your-repo>
-cd bitnet-capstone
-python -m venv .venv && source .venv/bin/activate
+git clone https://github.com/SeanMWX/CS495-Non-GPU.git
+cd CS495-Non-GPU
+```
+
+### 2 — Install Python dependencies
+
+```bash
+pip install lm_eval psutil codecarbon
+```
+
+### 3 — Set up BitNet (external dependency)
+
+Clone and build `bitnet.cpp` **at the exact commit used in this project** into a sibling directory (`../BitNet`):
+
+```bash
+# From the parent of CS495-Non-GPU
+git clone https://github.com/microsoft/BitNet.git
+cd BitNet
+git checkout 01eb415772c342d9f20dc42772f1583ae1e5b102
+
+# Install Python build deps
 pip install -r requirements.txt
 
-# 2. Verify setup
-python -m pytest tests/ -v
-
-# 3. Train baseline (Phase 2)
-python scripts/training/train.py --config configs/baseline_fp16.yaml
-
-# 4. Train BitNet b1.58 (Phase 3)
-python scripts/training/train.py --config configs/bitnet_b158.yaml
-
-# 5. Compare results (Phase 4)
-python scripts/benchmarking/compare_runs.py \
-    --runs results/logs/baseline_fp16/run_summary.json \
-            results/logs/bitnet_b158/run_summary.json \
-    --output results/plots/comparison
+# Build (Windows — requires Visual Studio 2022 + Clang)
+python setup_env.py -md models/BitNet-b1.58-2B-4T -q i2_s
 ```
+
+> The `setup_env.py` script builds the project **and** downloads the model in one step.
+> If you prefer to build and download separately:
+> ```bash
+> # Build only
+> cmake -B build -DCMAKE_BUILD_TYPE=Release
+> cmake --build build --config Release
+>
+> # Download model only
+> huggingface-cli download microsoft/bitnet-b1.58-2B-4T-gguf \
+>     --local-dir models/BitNet-b1.58-2B-4T
+> ```
+
+### 4 — Verify the model runs
+
+```bash
+# From inside the BitNet directory
+python run_inference.py \
+    -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
+    -p "What is 2+2?" \
+    -n 32 -t 4
+```
+
+You should see a short generated answer followed by timing stats (`~47 ms/token` on a modern laptop CPU with 4 threads).
+
+---
+
+## 📊 Running Benchmarks
+
+All scripts are run from the **repo root** (`CS495-Non-GPU/`).
+
+### Inference latency & memory benchmark
+
+Records latency, throughput, peak RSS, and energy to `results/step_metrics.csv`:
+
+```bash
+python scripts/metrics_tracker.py --threads 4 --n-tokens 128 --tag "baseline"
+```
+
+Key options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--threads` | 4 | CPU threads |
+| `--n-tokens` | 128 | Tokens to generate |
+| `--tag` | `""` | Label stored in CSV |
+| `--no-energy` | off | Skip CodeCarbon measurement |
+| `--out` | `results/step_metrics.csv` | Output file |
+
+### Accuracy evaluation (lm-evaluation-harness)
+
+Starts the BitNet server, runs lm-eval, then shuts the server down:
+
+```bash
+# Quick sanity check — 50 samples per task
+python scripts/run_lm_eval.py --tasks arc_easy --limit 50
+
+# Full benchmark (0-shot)
+python scripts/run_lm_eval.py --tasks arc_easy,arc_challenge,hellaswag,winogrande
+
+# MMLU (5-shot, as reported in arXiv:2504.12285)
+python scripts/run_lm_eval.py --tasks mmlu --num-fewshot 5
+```
+
+Results are saved as JSON to `results/lm_eval/`.
 
 ---
 
 ## Project Structure
 
 ```
-bitnet-capstone/
-├── configs/                    # YAML experiment configs
-│   ├── baseline_fp16.yaml      #   Standard FP16 transformer
-│   └── bitnet_b158.yaml        #   BitNet b1.58 (ternary weights)
-│
-├── models/
-│   ├── baseline/
-│   │   └── transformer.py      # FP16/BF16/FP32 decoder-only transformer
-│   └── bitnet/
-│       ├── bitlinear.py        # BitLinear: absmean quantization + STE
-│       └── bitnet_b158.py      # Full BitNet b1.58 model
-│
+CS495-Non-GPU/
 ├── scripts/
-│   ├── training/
-│   │   └── train.py            # Unified training entry point
-│   ├── evaluation/             # (Phase 4) lm-eval-harness wrappers
-│   └── benchmarking/
-│       └── compare_runs.py     # Load JSON logs → plots + tables
-│
-├── utils/
-│   └── metrics_tracker.py      # Time / memory / energy / perplexity tracker
+│   ├── metrics_tracker.py   # Inference latency / memory / energy → step_metrics.csv
+│   ├── run_lm_eval.py       # lm-eval harness wrapper (manages llama-server lifecycle)
+│   └── compare_runs.py      # (Phase 4) Generate comparison plots
 │
 ├── results/
-│   ├── checkpoints/            # Saved model weights
-│   ├── logs/                   # run_summary.json + step_metrics.csv
-│   └── plots/                  # Generated figures
+│   ├── step_metrics.csv     # Per-run inference benchmark results
+│   ├── lm_eval/             # lm-evaluation-harness JSON outputs
+│   └── comparison_table.csv # (Phase 4) Aggregated comparison table
 │
-├── tests/
-│   └── test_models.py          # Pytest sanity checks
-│
-├── notebooks/                  # EDA, prototyping, dashboard exploration
-├── docs/                       # Design notes, references
-└── requirements.txt
+├── PLAN.md                  # Project plan and task tracking
+├── REPORT.md                # Paper annotations, quantization notes, baseline results
+└── pyproject.toml
 ```
+
+> **External dependency:** `../BitNet` — the microsoft/BitNet repo (not tracked in this repo).
+> See setup step 3 above for the pinned commit and build instructions.
 
 ---
 
