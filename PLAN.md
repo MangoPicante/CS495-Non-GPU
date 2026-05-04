@@ -6,6 +6,12 @@
 **Author:** Sean Michael
 **Date:** April 27, 2026
 
+## Dependencies
+
+| Dependency | Location |
+| --- | --- |
+| `bitnet.cpp` (built) | `../BitNet` (external — outside this repo) |
+
 ### Description
 
 An independent reproduction and extension of Microsoft's published inference benchmarks for BitNet b1.58 2B4T ([arXiv:2504.12285](https://arxiv.org/abs/2504.12285)). Rather than training models from scratch, this project runs the BitNet b1.58 2B4T GGUF model locally via `bitnet.cpp` and benchmarks inference latency, throughput, memory footprint, and energy consumption on commodity CPU hardware. Accuracy results are compared against Microsoft's published FP16 baselines — LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, and MiniCPM 2B — to validate whether 1-bit quantization delivers meaningful real-world efficiency gains without significant accuracy loss.
@@ -25,12 +31,12 @@ An independent reproduction and extension of Microsoft's published inference ben
 
 ### Phase 1 — Repository Study
 
-- [ ] Clone and explore the [microsoft/BitNet](https://github.com/microsoft/BitNet) repository, test locally
-- [ ] Read and annotate the [BitNet b1.58 paper (Ma et al., 2024)](https://podcast.aiedus.org/uploads/pdf/pdf-1759573772863-893673714.pdf)
-- [ ] Read and annotate the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
-- [ ] Create a @REPORT.md documenting the absmean quantization function and Straight-Through Estimator
-- [ ] Add a summary to @REPORT.md of published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
-- [ ] Confirm benchmark target: BitNet b1.58 2B4T via `bitnet.cpp`
+- [x] Clone and explore the [microsoft/BitNet](https://github.com/microsoft/BitNet) repository
+- [x] Read and annotate the [BitNet b1.58 paper (Ma et al., 2024)](https://podcast.aiedus.org/uploads/pdf/pdf-1759573772863-893673714.pdf)
+- [x] Read and annotate the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
+- [x] Create a @REPORT.md documenting the absmean quantization function and Straight-Through Estimator
+- [x] Add a summary to @REPORT.md of published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
+- [x] Confirm benchmark target: BitNet b1.58 2B4T via `bitnet.cpp`
 
 ### Phase 2 — Environment Setup & Model Acquisition
 
