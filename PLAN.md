@@ -40,11 +40,11 @@ An independent reproduction and extension of Microsoft's published inference ben
 
 ### Phase 2 — Environment Setup & Model Acquisition
 
-- [ ] Configure `bitnet.cpp` inference environment on local CPU hardware
-- [ ] Download the BitNet b1.58 2B4T GGUF model checkpoint
-- [ ] Verify the model loads and produces output correctly via `bitnet.cpp`
-- [ ] Install and configure `lm-evaluation-harness` for accuracy benchmarking
-- [ ] Set up @metrics_tracker.py to record latency, memory, energy, and throughput per run
+- [x] Configure `bitnet.cpp` inference environment on local CPU hardware
+- [x] Download the BitNet b1.58 2B4T GGUF model checkpoint
+- [x] Verify the model loads and produces output correctly via `bitnet.cpp`
+- [x] Install and configure `lm-evaluation-harness` for accuracy benchmarking
+- [x] Set up @metrics_tracker.py to record latency, memory, energy, and throughput per run
 
 ### Phase 3 — Inference Benchmarking
 

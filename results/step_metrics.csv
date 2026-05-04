@@ -1,0 +1,2 @@
+timestamp,tag,model,threads,n_tokens,prompt_tokens,gen_tokens,prompt_ms_per_token,gen_ms_per_token,gen_tokens_per_sec,load_time_ms,total_time_ms,peak_rss_mb,energy_kg_co2,energy_kwh
+2026-05-03T23:47:38,smoke-test,ggml-model-i2_s.gguf,4,16,38,15,51.18,47.3,21.14,2598.51,3311.86,1345.5,,
