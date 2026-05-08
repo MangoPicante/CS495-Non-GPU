@@ -2,8 +2,9 @@
 Benchmark runner for BitNet b1.58 2B4T.
 
 Invokes llama-bench with a fixed set of prompt/generation sizes, captures
-per-run JSON output, measures peak RSS via psutil, and optionally tracks
-energy via CodeCarbon.  Results are appended to results/step_metrics.csv.
+per-run JSON output, measures peak RSS via psutil, and tracks energy and
+CO2 via CodeCarbon (enabled by default; skip with --no-energy).  Results
+are appended to results/step_metrics.csv.
 
 Usage:
     python scripts/metrics_tracker.py \
