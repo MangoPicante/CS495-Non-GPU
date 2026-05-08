@@ -1,4 +1,5 @@
 PYTHON     := py -3.11
+POETRY     := poetry
 THREADS    ?= 4
 
 BITNET_DIR    ?= ../Models/BitNet
@@ -10,12 +11,19 @@ MODEL         ?= $(BITNET_DIR)/$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf
 .DEFAULT_GOAL := help
 
 .PHONY: help \
+        venv install install-dev \
         bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
-        benchmark
+        benchmark plots \
+        clean nuke
 
 help:
 	@echo "Usage: make <target>"
+	@echo ""
+	@echo "Python environment (Poetry):"
+	@echo "  venv                Create/update the Poetry virtual environment"
+	@echo "  install             Install runtime dependencies (pyproject.toml)"
+	@echo "  install-dev         Install runtime + dev dependencies"
 	@echo ""
 	@echo "BitNet environment setup (run bitnet-setup for the full pipeline):"
 	@echo "  bitnet-setup        clone + submodules + deps + patch + build"
@@ -28,10 +36,28 @@ help:
 	@echo "  bitnet-verify       Quick inference smoke-test"
 	@echo "  bitnet-clean        Remove \$$(BITNET_DIR)"
 	@echo ""
-	@echo "Benchmarks:"
+	@echo "Benchmarks & analysis:"
 	@echo "  benchmark           Run inference latency/throughput/memory benchmark"
+	@echo "  plots               Generate comparison plots from results/step_metrics.csv"
 	@echo ""
-	@echo "Override destination:  make bitnet-setup BITNET_DIR=../Other/Path"
+	@echo "Housekeeping:"
+	@echo "  clean               Remove results/plots/ and cached .pyc files"
+	@echo "  nuke                clean + remove the Poetry virtualenv"
+	@echo ""
+	@echo "Overrides:"
+	@echo "  BITNET_DIR=../Other/Path   (default: $(BITNET_DIR))"
+	@echo "  THREADS=8                  (default: $(THREADS))"
+
+# ── Python environment (Poetry) ───────────────────────────────────────────────
+
+venv:
+	$(POETRY) env use $(PYTHON)
+
+install: venv
+	$(POETRY) install --only main
+
+install-dev: venv
+	$(POETRY) install
 
 # ── BitNet environment setup ───────────────────────────────────────────────────
 #
@@ -132,12 +158,23 @@ bitnet-verify:
 		-t $(THREADS)
 
 benchmark:
-	$(PYTHON) scripts/metrics_tracker.py \
+	$(POETRY) run python scripts/metrics_tracker.py \
 		--bitnet-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS)
+
+plots:
+	$(POETRY) run python scripts/compare_runs.py
 
 # ── Housekeeping ───────────────────────────────────────────────────────────────
 
 bitnet-clean:
 	rm -rf $(BITNET_DIR)
+
+clean:
+	rm -rf results/plots
+	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -name "*.pyc" -delete
+
+nuke: clean
+	$(POETRY) env remove --all

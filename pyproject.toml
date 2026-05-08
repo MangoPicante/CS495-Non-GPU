@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "cs495-non-gpu"
+version = "0.1.0"
+description = "Reproducible BitNet b1.58 2B4T inference benchmarking on CPU"
+authors = ["Sean Michael <seanwmichael@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python  = ">=3.11,<3.14"
+pandas  = "^2.2"
+matplotlib = "^3.9"
+numpy   = "^2.0"
+psutil  = "^6.0"
+codecarbon = "^2.3"
+requests = "^2.32"
+datasets = "^2.20"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.6"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry-core.masonry.api"
