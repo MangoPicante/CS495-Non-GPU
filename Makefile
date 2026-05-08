@@ -14,7 +14,7 @@ MODEL         ?= $(BITNET_DIR)/$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf
         venv install install-dev \
         bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
-        benchmark plots \
+        benchmark plots smoke-test \
         clean nuke
 
 help:
@@ -39,6 +39,7 @@ help:
 	@echo "Benchmarks & analysis:"
 	@echo "  benchmark           Run inference latency/throughput/memory benchmark"
 	@echo "  plots               Generate comparison plots from results/step_metrics.csv"
+	@echo "  smoke-test          Verify scripts produce expected outputs"
 	@echo ""
 	@echo "Housekeeping:"
 	@echo "  clean               Remove results/plots/ and cached .pyc files"
@@ -165,6 +166,9 @@ benchmark:
 
 plots:
 	$(POETRY) run python scripts/compare_runs.py
+
+smoke-test:
+	$(POETRY) run python scripts/smoke_test.py
 
 # ── Housekeeping ───────────────────────────────────────────────────────────────
 
