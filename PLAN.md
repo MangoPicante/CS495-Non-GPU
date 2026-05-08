@@ -40,28 +40,20 @@ An independent reproduction and extension of Microsoft's published inference ben
 ### Phase 2 — Environment Setup & Model Acquisition
 
 - [x] Clone the [microsoft/BitNet](https://github.com/microsoft/BitNet) repository
-- [x] Configure `bitnet.cpp` inference environment on local CPU hardware
-  - Built from commit `01eb415` with ClangCL 20 on Windows 11
-  - Three patches applied (const-pointer fix, missing `#include <chrono>` in common and examples)
-  - Full pipeline captured in `Makefile` (`make bitnet-setup bitnet-model`)
-- [x] Download the BitNet b1.58 2B4T GGUF model checkpoint (`ggml-model-i2_s.gguf`)
+- [x] Configure `bitnet.cpp` inference environment on local CPU hardware (`make bitnet-setup`)
+- [x] Download the BitNet b1.58 2B4T GGUF model checkpoint (`ggml-model-i2_s.gguf`) (`make bitnet-model`)
 - [x] Verify the model loads and produces output correctly via `bitnet.cpp` (`make bitnet-verify`)
 - [x] Set up Python environment via Poetry (`pyproject.toml`, `make install`)
 - [x] Set up `scripts/eval_accuracy.py` for accuracy evaluation
-  - Uses `llama-server` `/completion` API with first-token log-probability scoring
-  - Supports ARC (easy/challenge), WinoGrande, HellaSwag, MMLU (0-shot and few-shot)
-  - Includes `--start-server` flag for automatic server lifecycle management
-- [x] Set up `scripts/metrics_tracker.py` to record latency, memory, energy, and throughput per run
-  - Invokes `llama-bench` with `--output json`; monitors peak RSS via `psutil`
-  - Optional energy tracking via CodeCarbon; appends rows to `results/step_metrics.csv`
-- [x] Smoke-test scripts/metrics_tracker.py and scripts/eval_accuracy.py to confirm both run without errors and produce well-formed output
+- [x] Set up `scripts/metrics_tracker.py` to record latency, memory, energy (CodeCarbon), and throughput per run
+- [x] Smoke-test scripts/metrics_tracker.py and scripts/eval_accuracy.py to confirm both run without errors and produce well-formed output (`make smoke-test`)
 
 ### Phase 3 — Inference Benchmarking
 
 - [x] Run inference latency and throughput benchmarks on BitNet b1.58 2B4T via `make benchmark`
 - [x] Record latency (ms per token), throughput (tokens/s), and peak memory to @step_metrics.csv
 - [x] Run `scripts/eval_accuracy.py` on BitNet b1.58 2B4T (ARC, HellaSwag, WinoGrande, MMLU)
-- [x] Log energy consumption per run using CodeCarbon — estimated via TDP proxy in @REPORT.md
+- [x] Log energy consumption per run using CodeCarbon to @step_metrics.csv
 - [x] Create @REPORT.md and record all results; sanity-check against arXiv:2504.12285 Tables
 
 ### Phase 4 — Cost Comparison
@@ -69,10 +61,7 @@ An independent reproduction and extension of Microsoft's published inference ben
 - [x] Compile local benchmark results alongside published FP16 baselines (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) into @comparison_table.csv
 - [x] Run `scripts/compare_runs.py` (`make plots`) to generate throughput, memory, and accuracy comparison plots
 - [x] Compute cost-accuracy trade-off (dollar cost proxy: time × hardware rate)
-  - `cost_per_1k_tokens` column in @comparison_table.csv; `--hardware-rate` flag defaults to $0.170/hr (AWS c5.xlarge on-demand, us-east-1)
-  - `results/plots/cost_accuracy.png` — MMLU vs cost/1k-tokens scatter
 - [ ] Estimate carbon footprint using CodeCarbon measurements (falling back to TDP proxy if unavailable) and compare against FP16 estimates from the literature
-  - CodeCarbon data collected: energy_kwh and co2_kg populated in @step_metrics.csv (benchmark re-run 2026-05-08)
 - [ ] Produce final benchmark dashboard (plots + @comparison_table.csv) in @FINAL_REPORT.md
 
 ### Phase 5 — Optimization & Writeup
