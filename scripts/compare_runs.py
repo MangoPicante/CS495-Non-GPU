@@ -1,37 +1,74 @@
 """
-Generates comparison plots for Phase 4 of the capstone.
+Generates comparison plots and a comparison CSV for Phase 4 of the capstone.
 
 Reads results/step_metrics.csv (local BitNet b1.58 2B4T measurements) and
-overlays published FP16 baseline numbers from arXiv:2504.12285 Table 1.
-Saves plots to results/plots/.
+results/accuracy_results.json, then overlays published FP16 baseline numbers
+from arXiv:2504.12285 Table 1.  Saves plots to results/plots/ and a summary
+CSV to --csv path (default: results/comparison_table.csv).
 
 Usage:
-    python scripts/compare_runs.py [--results results/step_metrics.csv]
+    python scripts/compare_runs.py
+        [--results results/step_metrics.csv]
+        [--accuracy results/accuracy_results.json]
+        [--csv results/comparison_table.csv]
 """
 
 import argparse
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 PLOTS_DIR = Path(__file__).parent.parent / "results" / "plots"
 DEFAULT_CSV = Path(__file__).parent.parent / "results" / "step_metrics.csv"
+DEFAULT_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results.json"
+DEFAULT_COMPARISON_CSV = Path(__file__).parent.parent / "results" / "comparison_table.csv"
 
-# Published FP16 baseline throughput (tokens/s) from arXiv:2504.12285 Table 1
-# Condition: n_prompt=512, n_gen=128, single-thread x86 CPU
+# Published FP16 baseline numbers from arXiv:2504.12285 Table 1
+# Throughput condition: n_prompt=512, n_gen=128, single-thread x86 CPU
 FP16_BASELINES = {
-    "LLaMA 3.2 1B": {"throughput_tokens_s": 4.5, "peak_rss_mb": 2600},
-    "Gemma-3 1B":   {"throughput_tokens_s": 4.1, "peak_rss_mb": 2700},
-    "Qwen2.5 1.5B": {"throughput_tokens_s": 3.8, "peak_rss_mb": 3100},
-    "SmolLM2 1.7B": {"throughput_tokens_s": 3.5, "peak_rss_mb": 3300},
-    "MiniCPM 2B":   {"throughput_tokens_s": 2.9, "peak_rss_mb": 4100},
+    "LLaMA 3.2 1B": {
+        "throughput_tokens_s": 4.5,  "peak_rss_mb": 2600,
+        "arc_easy": 69.87, "arc_challenge": 41.04,
+        "winogrande": 60.77, "hellaswag": 61.05, "mmlu": 42.12,
+    },
+    "Gemma-3 1B": {
+        "throughput_tokens_s": 4.1,  "peak_rss_mb": 2700,
+        "arc_easy": 79.42, "arc_challenge": 46.25,
+        "winogrande": 66.38, "hellaswag": 72.15, "mmlu": 50.33,
+    },
+    "Qwen2.5 1.5B": {
+        "throughput_tokens_s": 3.8,  "peak_rss_mb": 3100,
+        "arc_easy": 79.92, "arc_challenge": 52.82,
+        "winogrande": 66.61, "hellaswag": 70.95, "mmlu": 61.11,
+    },
+    "SmolLM2 1.7B": {
+        "throughput_tokens_s": 3.5,  "peak_rss_mb": 3300,
+        "arc_easy": 81.82, "arc_challenge": 52.99,
+        "winogrande": 68.67, "hellaswag": 72.29, "mmlu": 51.77,
+    },
+    "MiniCPM 2B": {
+        "throughput_tokens_s": 2.9,  "peak_rss_mb": 4100,
+        "arc_easy": 82.20, "arc_challenge": 51.96,
+        "winogrande": 68.27, "hellaswag": 75.08, "mmlu": 53.07,
+    },
+}
+
+# BitNet b1.58 2B4T numbers as reported in arXiv:2504.12285
+BITNET_PAPER = {
+    "throughput_tokens_s": 20.0, "peak_rss_mb": 1400,
+    "arc_easy": 74.79, "arc_challenge": 49.91,
+    "winogrande": 71.90, "hellaswag": 68.44, "mmlu": 53.17,
 }
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--results", default=str(DEFAULT_CSV))
+    p.add_argument("--accuracy", default=str(DEFAULT_ACCURACY_JSON))
+    p.add_argument("--csv", default=str(DEFAULT_COMPARISON_CSV))
     return p.parse_args()
 
 
@@ -45,10 +82,31 @@ def load_local(csv_path: Path) -> pd.DataFrame:
     return df
 
 
+def load_accuracy(json_path: Path) -> dict:
+    if not json_path.exists():
+        print(f"No accuracy results at {json_path} — accuracy columns will be empty.")
+        return {}
+    with json_path.open() as f:
+        data = json.load(f)
+    return {
+        "arc_easy":      data.get("arc_easy",      {}).get("accuracy"),
+        "arc_challenge": data.get("arc_challenge", {}).get("accuracy"),
+        "winogrande":    data.get("winogrande",    {}).get("accuracy"),
+        "hellaswag":     data.get("hellaswag",     {}).get("accuracy"),
+        "mmlu":          data.get("mmlu",          {}).get("accuracy"),
+    }
+
+
+def _bitnet_row(local_df: pd.DataFrame) -> tuple[float | None, float | None]:
+    """Return (median throughput, median peak_rss) for the n_prompt=512, n_gen=128 condition."""
+    row = local_df[(local_df["n_prompt"] == 512) & (local_df["n_gen"] == 128)]
+    tps = row["throughput_tokens_s"].median() if not row.empty else None
+    rss = row["peak_rss_mb"].median() if not row.empty else None
+    return tps, rss
+
+
 def plot_throughput(local_df: pd.DataFrame, out_dir: Path):
-    # Use n_prompt=512, n_gen=128 condition to match published baselines
-    local_row = local_df[(local_df["n_prompt"] == 512) & (local_df["n_gen"] == 128)]
-    bitnet_tps = local_row["throughput_tokens_s"].median() if not local_row.empty else None
+    bitnet_tps, _ = _bitnet_row(local_df)
 
     models = list(FP16_BASELINES.keys()) + ["BitNet b1.58 2B4T"]
     values = [FP16_BASELINES[m]["throughput_tokens_s"] for m in FP16_BASELINES]
@@ -69,8 +127,7 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path):
 
 
 def plot_memory(local_df: pd.DataFrame, out_dir: Path):
-    local_row = local_df[(local_df["n_prompt"] == 512) & (local_df["n_gen"] == 128)]
-    bitnet_rss = local_row["peak_rss_mb"].median() if not local_row.empty else None
+    _, bitnet_rss = _bitnet_row(local_df)
 
     models = list(FP16_BASELINES.keys()) + ["BitNet b1.58 2B4T"]
     values = [FP16_BASELINES[m]["peak_rss_mb"] for m in FP16_BASELINES]
@@ -91,7 +148,6 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path):
 
 
 def plot_throughput_by_config(local_df: pd.DataFrame, out_dir: Path):
-    """Show BitNet throughput across all (n_prompt, n_gen) conditions."""
     configs = local_df.groupby(["n_prompt", "n_gen"])["throughput_tokens_s"].median().reset_index()
     labels = [f"p{row.n_prompt}/g{row.n_gen}" for _, row in configs.iterrows()]
 
@@ -106,15 +162,93 @@ def plot_throughput_by_config(local_df: pd.DataFrame, out_dir: Path):
     print(f"Saved {path}")
 
 
+def plot_accuracy(local_acc: dict, out_dir: Path):
+    # WinoGrande/HellaSwag omitted: our letter-scoring method is methodology-
+    # incompatible with the paper's continuation scoring, giving near-random results.
+    tasks = ["arc_easy", "arc_challenge", "mmlu"]
+    task_labels = ["ARC-Easy", "ARC-Challenge", "MMLU"]
+    task_colors = ["#4C72B0", "#55A868", "#C44E52"]
+
+    fp16_models = list(FP16_BASELINES.keys())
+    all_models = fp16_models + ["BitNet 2B4T\n(paper)", "BitNet 2B4T\n(ours)"]
+
+    paper_vals = [BITNET_PAPER[t] for t in tasks]
+    our_vals = [local_acc.get(t) or 0 for t in tasks]
+
+    x = np.arange(len(all_models))
+    width = 0.25
+    offsets = np.array([-width, 0, width])
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for i, (task, label, color) in enumerate(zip(tasks, task_labels, task_colors)):
+        vals = (
+            [FP16_BASELINES[m][task] for m in fp16_models]
+            + [paper_vals[i], our_vals[i]]
+        )
+        ax.bar(x + offsets[i], vals, width, label=label, color=color)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(all_models, ha="center")
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_ylim(0, 105)
+    ax.set_title(
+        "Accuracy Comparison: BitNet b1.58 2B4T vs FP16 Baselines\n"
+        "(ARC-Easy, ARC-Challenge, MMLU — paper: 0-shot except MMLU 5-shot)"
+    )
+    ax.legend()
+    fig.tight_layout()
+    path = out_dir / "accuracy_comparison.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
+def write_comparison_csv(local_df: pd.DataFrame, local_acc: dict, out_path: Path):
+    ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
+    rows = []
+
+    for name, b in FP16_BASELINES.items():
+        rows.append({
+            "model": name,
+            "source": "paper (FP16)",
+            "throughput_tokens_s": b["throughput_tokens_s"],
+            "peak_rss_mb": b["peak_rss_mb"],
+            **{f: b[f] for f in ACC_FIELDS},
+        })
+
+    rows.append({
+        "model": "BitNet b1.58 2B4T",
+        "source": "paper",
+        "throughput_tokens_s": BITNET_PAPER["throughput_tokens_s"],
+        "peak_rss_mb": BITNET_PAPER["peak_rss_mb"],
+        **{f: BITNET_PAPER[f] for f in ACC_FIELDS},
+    })
+
+    bitnet_tps, bitnet_rss = _bitnet_row(local_df)
+    rows.append({
+        "model": "BitNet b1.58 2B4T",
+        "source": "ours",
+        "throughput_tokens_s": round(bitnet_tps, 2) if bitnet_tps is not None else "",
+        "peak_rss_mb": round(bitnet_rss, 0) if bitnet_rss is not None else "",
+        **{f: (round(local_acc[f], 2) if local_acc.get(f) is not None else "") for f in ACC_FIELDS},
+    })
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(out_path, index=False)
+    print(f"Saved {out_path}")
+
+
 def main():
     args = parse_args()
-    csv_path = Path(args.results)
-    local_df = load_local(csv_path)
+    local_df = load_local(Path(args.results))
+    local_acc = load_accuracy(Path(args.accuracy))
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     plot_throughput(local_df, PLOTS_DIR)
     plot_memory(local_df, PLOTS_DIR)
     plot_throughput_by_config(local_df, PLOTS_DIR)
+    plot_accuracy(local_acc, PLOTS_DIR)
+    write_comparison_csv(local_df, local_acc, Path(args.csv))
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
 

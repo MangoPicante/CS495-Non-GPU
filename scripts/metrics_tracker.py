@@ -175,8 +175,11 @@ def main():
 
         if tracker:
             emissions = tracker.stop()
-            energy_kwh = tracker._total_energy.kWh if hasattr(tracker, "_total_energy") else None
-            co2_kg = emissions  # codecarbon returns kg CO2eq
+            co2_kg = float(emissions) if emissions is not None else None
+            try:
+                energy_kwh = tracker.final_emissions_data.energy_consumed
+            except Exception:
+                energy_kwh = None
 
         metrics = extract_metrics(bench_json, n_prompt, n_gen)
         row = {
