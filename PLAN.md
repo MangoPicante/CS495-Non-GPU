@@ -66,10 +66,13 @@ An independent reproduction and extension of Microsoft's published inference ben
 
 ### Phase 4 — Cost Comparison
 
-- [ ] Compile local benchmark results alongside published FP16 baselines (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) into @comparison_table.csv
-- [ ] Run `scripts/compare_runs.py` (`make plots`) to generate throughput, memory, and accuracy comparison plots
-- [ ] Compute cost-accuracy trade-off (dollar cost proxy: time × hardware rate)
+- [x] Compile local benchmark results alongside published FP16 baselines (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) into @comparison_table.csv
+- [x] Run `scripts/compare_runs.py` (`make plots`) to generate throughput, memory, and accuracy comparison plots
+- [x] Compute cost-accuracy trade-off (dollar cost proxy: time × hardware rate)
+  - `cost_per_1k_tokens` column in @comparison_table.csv; `--hardware-rate` flag defaults to $0.170/hr (AWS c5.xlarge on-demand, us-east-1)
+  - `results/plots/cost_accuracy.png` — MMLU vs cost/1k-tokens scatter
 - [ ] Estimate carbon footprint using CodeCarbon measurements (falling back to TDP proxy if unavailable) and compare against FP16 estimates from the literature
+  - CodeCarbon data collected: energy_kwh and co2_kg populated in @step_metrics.csv (benchmark re-run 2026-05-08)
 - [ ] Produce final benchmark dashboard (plots + @comparison_table.csv) in @FINAL_REPORT.md
 
 ### Phase 5 — Optimization & Writeup
