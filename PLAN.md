@@ -31,21 +31,22 @@ An independent reproduction and extension of Microsoft's published inference ben
 
 ### Phase 1 — Repository Study
 
-- [x] Clone the [microsoft/BitNet](https://github.com/microsoft/BitNet) repository
 - [ ] Create @BITNET_SUMMARY.md to describe the model
   - [x] Summarize the [BitNet b1.58 paper (Ma et al., 2024)](https://podcast.aiedus.org/uploads/pdf/pdf-1759573772863-893673714.pdf)
   - [x] Summarize the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
   - [ ] Document the absmean quantization function and Straight-Through Estimator in @BITNET_SUMMARY.md
-  - [ ] Summarize published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
+  - [ ] Document published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
 
 ### Phase 2 — Environment Setup & Model Acquisition
 
+- [x] Clone the [microsoft/BitNet](https://github.com/microsoft/BitNet) repository
 - [x] Configure `bitnet.cpp` inference environment on local CPU hardware
   - Built from commit `01eb415` with ClangCL 20 on Windows 11
   - Three patches applied (const-pointer fix, missing `#include <chrono>` in common and examples)
   - Full pipeline captured in `Makefile` (`make bitnet-setup bitnet-model`)
 - [x] Download the BitNet b1.58 2B4T GGUF model checkpoint (`ggml-model-i2_s.gguf`)
 - [x] Verify the model loads and produces output correctly via `bitnet.cpp` (`make bitnet-verify`)
+- [x] Set up Python environment via Poetry (`pyproject.toml`, `make install`)
 - [x] Set up `scripts/eval_accuracy.py` for accuracy evaluation
   - Uses `llama-server` `/completion` API with first-token log-probability scoring
   - Supports ARC (easy/challenge), WinoGrande, HellaSwag, MMLU (0-shot and few-shot)
@@ -53,23 +54,15 @@ An independent reproduction and extension of Microsoft's published inference ben
 - [x] Set up `scripts/metrics_tracker.py` to record latency, memory, energy, and throughput per run
   - Invokes `llama-bench` with `--output json`; monitors peak RSS via `psutil`
   - Optional energy tracking via CodeCarbon; appends rows to `results/step_metrics.csv`
-- [x] Set up Python environment via Poetry (`pyproject.toml`, `make install`)
+- [ ] Run a smoke test to confirm that all scripts run and metrics are being properly recorded
+
 
 ### Phase 3 — Inference Benchmarking
 
 - [x] Run inference latency and throughput benchmarks on BitNet b1.58 2B4T via `make benchmark`
 - [x] Record latency (ms per token), throughput (tokens/s), and peak memory to @step_metrics.csv
-  - p=512/g=128: 20.78 tok/s, 48.1 ms/tok, 1246 MB RSS
-  - p=512/g=512: 20.35 tok/s, 49.1 ms/tok, 1247 MB RSS
-  - p=1/g=512:   20.30 tok/s, 49.3 ms/tok, 1231 MB RSS
 - [x] Run `scripts/eval_accuracy.py` on BitNet b1.58 2B4T (ARC, HellaSwag, WinoGrande, MMLU)
-  - ARC-Easy (0-shot, n=2367): **85.68%** (paper: 74.79%, +10.9%)
-  - ARC-Challenge (0-shot, n=500): **70.40%** (paper: 49.91%, +20.5%)
-  - WinoGrande (0-shot, n=500): 52.80% (paper: 71.9%) — letter-scoring mismatch
-  - HellaSwag (0-shot, n=500): 51.20% (paper: 68.44%) — letter-scoring mismatch
-  - MMLU (0-shot, 9 subjects, n=180): **45.56%** (paper 5-shot: 53.17%, −7.6%)
 - [x] Log energy consumption per run using CodeCarbon — estimated via TDP proxy in @REPORT.md
-  - Hardware tracking omitted (CodeCarbon requires network); ~0.002 kWh per benchmark run estimated
 - [x] Create @REPORT.md and record all results; sanity-check against arXiv:2504.12285 Tables
 
 ### Phase 4 — Cost Comparison
