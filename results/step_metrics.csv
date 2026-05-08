@@ -1,0 +1,4 @@
+timestamp,threads,n_prompt,n_gen,avg_latency_ms_token,throughput_tokens_s,peak_rss_mb,energy_kwh,co2_kg
+2026-05-08T05:14:28,4,512,128,48.114,20.784,1245.9,,
+2026-05-08T05:16:00,4,512,512,49.146,20.347,1246.5,,
+2026-05-08T05:17:17,4,1,512,49.27,20.296,1230.5,,

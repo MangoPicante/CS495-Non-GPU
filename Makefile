@@ -51,7 +51,7 @@ help:
 # ── Python environment (Poetry) ───────────────────────────────────────────────
 
 venv:
-	$(POETRY) env use $(PYTHON)
+	$(POETRY) env use $(shell $(PYTHON) -c "import sys; print(sys.executable)")
 
 install: venv
 	$(POETRY) install --only main

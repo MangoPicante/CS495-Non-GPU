@@ -77,7 +77,8 @@ def run_bench(llama_bench: Path, model: Path, n_prompt: int, n_gen: int, threads
         "-p", str(n_prompt),
         "-n", str(n_gen),
         "-t", str(threads),
-        "--output", "json",
+        "-ub", "128",  # TL2 kernel built with BM=160; ubatch≥160 overflows the thread stack
+        "-o", "json",
         "-r", "3",   # 3 repetitions → median is more stable
     ]
     proc = psutil.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
