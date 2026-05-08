@@ -54,6 +54,7 @@ for plot_name in [
     "memory_comparison.png",
     "bitnet_throughput_configs.png",
     "accuracy_comparison.png",
+    "cost_accuracy.png",
 ]:
     p = RESULTS / "plots" / plot_name
     check(f"plots/{plot_name} non-empty", p.exists() and p.stat().st_size > 0)
@@ -68,6 +69,7 @@ if csv_path.exists():
 
     required_cols = {
         "model", "source", "throughput_tokens_s", "peak_rss_mb",
+        "cost_per_1k_tokens",
         "arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu",
     }
     missing = required_cols - set(rows[0].keys()) if rows else required_cols
@@ -76,8 +78,9 @@ if csv_path.exists():
     ours = next((r for r in rows if r.get("source") == "ours"), None)
     check("'ours' row present", ours is not None)
     if ours:
-        check("'ours' row has throughput", ours["throughput_tokens_s"] != "")
-        check("'ours' row has arc_easy",   ours["arc_easy"] != "")
+        check("'ours' row has throughput",        ours["throughput_tokens_s"] != "")
+        check("'ours' row has cost_per_1k_tokens", ours["cost_per_1k_tokens"] != "")
+        check("'ours' row has arc_easy",           ours["arc_easy"] != "")
 
 # ── metrics_tracker.py ────────────────────────────────────────────────────────
 

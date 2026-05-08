@@ -6,11 +6,17 @@ results/accuracy_results.json, then overlays published FP16 baseline numbers
 from arXiv:2504.12285 Table 1.  Saves plots to results/plots/ and a summary
 CSV to --csv path (default: results/comparison_table.csv).
 
+Hardware rate default: AWS c5.xlarge on-demand, us-east-1 ($0.170/hr, 4 vCPUs).
+On-demand pricing is used rather than spot for reproducibility — spot prices
+change hourly and would make cost numbers non-comparable across runs.
+Override with --hardware-rate if running on different hardware.
+
 Usage:
     python scripts/compare_runs.py
         [--results results/step_metrics.csv]
         [--accuracy results/accuracy_results.json]
         [--csv results/comparison_table.csv]
+        [--hardware-rate 0.170]
 """
 
 import argparse
@@ -25,6 +31,10 @@ PLOTS_DIR = Path(__file__).parent.parent / "results" / "plots"
 DEFAULT_CSV = Path(__file__).parent.parent / "results" / "step_metrics.csv"
 DEFAULT_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results.json"
 DEFAULT_COMPARISON_CSV = Path(__file__).parent.parent / "results" / "comparison_table.csv"
+
+# AWS c5.xlarge on-demand, us-east-1 (4 vCPUs — matches 4-thread benchmark condition)
+# Source: https://instances.vantage.sh/aws/ec2/c5.xlarge (retrieved 2026-05-08)
+DEFAULT_HARDWARE_RATE = 0.170
 
 # Published FP16 baseline numbers from arXiv:2504.12285 Table 1
 # Throughput condition: n_prompt=512, n_gen=128, single-thread x86 CPU
@@ -69,6 +79,13 @@ def parse_args():
     p.add_argument("--results", default=str(DEFAULT_CSV))
     p.add_argument("--accuracy", default=str(DEFAULT_ACCURACY_JSON))
     p.add_argument("--csv", default=str(DEFAULT_COMPARISON_CSV))
+    p.add_argument(
+        "--hardware-rate",
+        type=float,
+        default=DEFAULT_HARDWARE_RATE,
+        metavar="$/HR",
+        help="On-demand $/hr for the target instance (default: %(default)s — AWS c5.xlarge us-east-1)",
+    )
     return p.parse_args()
 
 
@@ -103,6 +120,58 @@ def _bitnet_row(local_df: pd.DataFrame) -> tuple[float | None, float | None]:
     tps = row["throughput_tokens_s"].median() if not row.empty else None
     rss = row["peak_rss_mb"].median() if not row.empty else None
     return tps, rss
+
+
+def cost_per_1k(throughput_tokens_s: float, rate_per_hour: float) -> float:
+    """Dollar cost to generate 1,000 tokens at the given throughput and hourly hardware rate."""
+    return (1000.0 / throughput_tokens_s / 3600.0) * rate_per_hour
+
+
+def build_comparison_df(
+    local_df: pd.DataFrame,
+    local_acc: dict,
+    hardware_rate: float,
+) -> pd.DataFrame:
+    ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
+    rows = []
+
+    for name, b in FP16_BASELINES.items():
+        rows.append({
+            "model": name,
+            "source": "paper (FP16)",
+            "throughput_tokens_s": b["throughput_tokens_s"],
+            "peak_rss_mb": b["peak_rss_mb"],
+            "cost_per_1k_tokens": round(cost_per_1k(b["throughput_tokens_s"], hardware_rate), 6),
+            **{f: b[f] for f in ACC_FIELDS},
+        })
+
+    rows.append({
+        "model": "BitNet b1.58 2B4T",
+        "source": "paper",
+        "throughput_tokens_s": BITNET_PAPER["throughput_tokens_s"],
+        "peak_rss_mb": BITNET_PAPER["peak_rss_mb"],
+        "cost_per_1k_tokens": round(cost_per_1k(BITNET_PAPER["throughput_tokens_s"], hardware_rate), 6),
+        **{f: BITNET_PAPER[f] for f in ACC_FIELDS},
+    })
+
+    bitnet_tps, bitnet_rss = _bitnet_row(local_df)
+    our_cost = round(cost_per_1k(bitnet_tps, hardware_rate), 6) if bitnet_tps else ""
+    rows.append({
+        "model": "BitNet b1.58 2B4T",
+        "source": "ours",
+        "throughput_tokens_s": round(bitnet_tps, 2) if bitnet_tps is not None else "",
+        "peak_rss_mb": round(bitnet_rss, 0) if bitnet_rss is not None else "",
+        "cost_per_1k_tokens": our_cost,
+        **{f: (round(local_acc[f], 2) if local_acc.get(f) is not None else "") for f in ACC_FIELDS},
+    })
+
+    return pd.DataFrame(rows)
+
+
+def write_comparison_csv(df: pd.DataFrame, out_path: Path) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_path, index=False)
+    print(f"Saved {out_path}")
 
 
 def plot_throughput(local_df: pd.DataFrame, out_dir: Path):
@@ -203,39 +272,56 @@ def plot_accuracy(local_acc: dict, out_dir: Path):
     print(f"Saved {path}")
 
 
-def write_comparison_csv(local_df: pd.DataFrame, local_acc: dict, out_path: Path):
-    ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
-    rows = []
+def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
+    # Use MMLU as the accuracy axis — most general benchmark, reported by all models.
+    # FP16 baselines and BitNet paper row use paper-reported MMLU (comparable methodology).
+    # BitNet "ours" uses 0-shot MMLU vs paper's 5-shot; annotated separately.
+    plot_df = df[df["cost_per_1k_tokens"].notna() & (df["cost_per_1k_tokens"] != "")].copy()
+    plot_df = plot_df[plot_df["mmlu"].notna() & (plot_df["mmlu"] != "")].copy()
+    plot_df["cost_per_1k_tokens"] = pd.to_numeric(plot_df["cost_per_1k_tokens"])
+    plot_df["mmlu"] = pd.to_numeric(plot_df["mmlu"])
 
-    for name, b in FP16_BASELINES.items():
-        rows.append({
-            "model": name,
-            "source": "paper (FP16)",
-            "throughput_tokens_s": b["throughput_tokens_s"],
-            "peak_rss_mb": b["peak_rss_mb"],
-            **{f: b[f] for f in ACC_FIELDS},
-        })
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-    rows.append({
-        "model": "BitNet b1.58 2B4T",
-        "source": "paper",
-        "throughput_tokens_s": BITNET_PAPER["throughput_tokens_s"],
-        "peak_rss_mb": BITNET_PAPER["peak_rss_mb"],
-        **{f: BITNET_PAPER[f] for f in ACC_FIELDS},
-    })
+    styles = {
+        "paper (FP16)": {"color": "#4C72B0", "marker": "o", "s": 100, "label": "FP16 baselines (paper)"},
+        "paper":        {"color": "#DD8452", "marker": "o", "s": 100, "label": "BitNet b1.58 2B4T (paper)"},
+        "ours":         {"color": "#DD8452", "marker": "D", "s": 100, "label": "BitNet b1.58 2B4T (ours, 0-shot MMLU)"},
+    }
 
-    bitnet_tps, bitnet_rss = _bitnet_row(local_df)
-    rows.append({
-        "model": "BitNet b1.58 2B4T",
-        "source": "ours",
-        "throughput_tokens_s": round(bitnet_tps, 2) if bitnet_tps is not None else "",
-        "peak_rss_mb": round(bitnet_rss, 0) if bitnet_rss is not None else "",
-        **{f: (round(local_acc[f], 2) if local_acc.get(f) is not None else "") for f in ACC_FIELDS},
-    })
+    for source, style in styles.items():
+        subset = plot_df[plot_df["source"] == source]
+        if subset.empty:
+            continue
+        ax.scatter(
+            subset["cost_per_1k_tokens"],
+            subset["mmlu"],
+            color=style["color"],
+            marker=style["marker"],
+            s=style["s"],
+            label=style["label"],
+            zorder=3,
+        )
+        for _, row in subset.iterrows():
+            label = row["model"].replace(" b1.58 2B4T", "").replace(" (FP16)", "")
+            ax.annotate(
+                label,
+                (row["cost_per_1k_tokens"], row["mmlu"]),
+                textcoords="offset points",
+                xytext=(6, 4),
+                fontsize=8,
+            )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(out_path, index=False)
-    print(f"Saved {out_path}")
+    ax.set_xlabel(f"Cost per 1,000 tokens (USD, c5.xlarge @ ${hardware_rate:.3f}/hr)")
+    ax.set_ylabel("MMLU Accuracy (%)")
+    ax.set_title("Cost–Accuracy Trade-off: BitNet b1.58 2B4T vs FP16 Baselines")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    path = out_dir / "cost_accuracy.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved {path}")
 
 
 def main():
@@ -244,11 +330,14 @@ def main():
     local_acc = load_accuracy(Path(args.accuracy))
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    comparison_df = build_comparison_df(local_df, local_acc, args.hardware_rate)
+    write_comparison_csv(comparison_df, Path(args.csv))
+
     plot_throughput(local_df, PLOTS_DIR)
     plot_memory(local_df, PLOTS_DIR)
     plot_throughput_by_config(local_df, PLOTS_DIR)
     plot_accuracy(local_acc, PLOTS_DIR)
-    write_comparison_csv(local_df, local_acc, Path(args.csv))
+    plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
 
