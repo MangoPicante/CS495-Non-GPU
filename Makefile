@@ -1,6 +1,7 @@
 PYTHON     := py -3.11
 POETRY     := poetry
 THREADS    ?= 4
+LIMIT      ?= 500
 
 BITNET_DIR    ?= ../Models/BitNet
 BITNET_COMMIT := 01eb415772c342d9f20dc42772f1583ae1e5b102  # HEAD as of May 2026; pinned for reproducibility
@@ -15,6 +16,7 @@ MODEL         ?= $(BITNET_DIR)/$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf
         bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
         benchmark plots smoke-test \
+        eval-winogrande eval-hellaswag \
         clean nuke
 
 help:
@@ -38,6 +40,8 @@ help:
 	@echo ""
 	@echo "Benchmarks & analysis:"
 	@echo "  benchmark           Run inference benchmark (latency, throughput, memory, energy)"
+	@echo "  eval-winogrande     Run WinoGrande eval with continuation scoring (LIMIT=$(LIMIT))"
+	@echo "  eval-hellaswag      Run HellaSwag eval with continuation scoring (LIMIT=$(LIMIT))"
 	@echo "  plots               Generate plots + comparison_table.csv from benchmark and accuracy results"
 	@echo "  smoke-test          Verify scripts produce expected outputs"
 	@echo ""
@@ -48,6 +52,7 @@ help:
 	@echo "Overrides:"
 	@echo "  BITNET_DIR=../Other/Path   (default: $(BITNET_DIR))"
 	@echo "  THREADS=8                  (default: $(THREADS))"
+	@echo "  LIMIT=100                  (default: $(LIMIT), applies to eval targets)"
 
 # ── Python environment (Poetry) ───────────────────────────────────────────────
 
@@ -163,6 +168,24 @@ benchmark:
 		--bitnet-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS)
+
+eval-winogrande:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task winogrande \
+		--bitnet-dir $(BITNET_DIR) \
+		--model $(MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--start-server
+
+eval-hellaswag:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task hellaswag \
+		--bitnet-dir $(BITNET_DIR) \
+		--model $(MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--start-server
 
 plots:
 	$(POETRY) run python scripts/compare_runs.py

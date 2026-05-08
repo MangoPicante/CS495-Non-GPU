@@ -53,6 +53,7 @@ An independent reproduction and extension of Microsoft's published inference ben
 - [x] Run inference latency and throughput benchmarks on BitNet b1.58 2B4T via `make benchmark`
 - [x] Record latency (ms per token), throughput (tokens/s), and peak memory to @step_metrics.csv
 - [x] Run `scripts/eval_accuracy.py` on BitNet b1.58 2B4T (ARC, HellaSwag, WinoGrande, MMLU)
+- [ ] Re-run WinoGrande and HellaSwag with continuation scoring (`make eval-winogrande eval-hellaswag`) and update @accuracy_results.json
 - [x] Log energy consumption per run using CodeCarbon to @step_metrics.csv
 - [x] Create @REPORT.md and record all results; sanity-check against arXiv:2504.12285 Tables
 
