@@ -1,0 +1,34 @@
+{
+  "arc_easy": {
+    "accuracy": 85.68,
+    "correct": 2028,
+    "total": 2367,
+    "skipped": 9,
+    "elapsed_s": 34897.9,
+    "paper_target": 74.79
+  },
+  "arc_challenge": {
+    "accuracy": 70.4,
+    "correct": 352,
+    "total": 500,
+    "skipped": 0,
+    "elapsed_s": 1363.8,
+    "paper_target": 49.91
+  },
+  "winogrande": {
+    "accuracy": 52.8,
+    "correct": 264,
+    "total": 500,
+    "skipped": 0,
+    "elapsed_s": 407.6,
+    "paper_target": 71.9
+  },
+  "hellaswag": {
+    "accuracy": 51.2,
+    "correct": 256,
+    "total": 500,
+    "skipped": 0,
+    "elapsed_s": 1954.2,
+    "paper_target": 68.44
+  }
+}

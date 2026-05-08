@@ -60,6 +60,7 @@ def _start_server(bitnet_dir: Path, model: Path, threads: int, port: int, ctx: i
             _server_proc.kill()
     bin_path = _find_server_bin(bitnet_dir)
     cmd = [str(bin_path), "-m", str(model), "-c", str(ctx), "-t", str(threads),
+           "-ub", "128",  # TL2 kernel BM=160 overflows stack at >=160 tokens/batch
            "-ngl", "0", "--host", "127.0.0.1", "--port", str(port), "-cb"]
     _server_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}/health"
