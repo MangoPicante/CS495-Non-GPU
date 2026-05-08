@@ -23,7 +23,7 @@ help:
 	@echo "  clean        Remove __pycache__, .pytest_cache, *.pyc"
 	@echo "  nuke         Remove .venv and clean"
 	@echo "  run          Run the package entry point"
-	@echo "  benchmark    Run inference benchmarks (set BINARY= and MODEL=)"
+	@echo "  benchmark    Run inference benchmark (set BITNET_DIR=, MODEL=, THREADS=)"
 	@echo "  plots        Generate comparison plots from results/"
 	@echo ""
 	@echo "BitNet environment setup:"
@@ -32,8 +32,8 @@ help:
 	@echo "  bitnet-checkout    Pin repo to commit \$$(BITNET_COMMIT)"
 	@echo "  bitnet-submodules  git submodule update --init --recursive"
 	@echo "  bitnet-deps        pip install requirements + gguf-py"
-	@echo "  bitnet-patch       Apply ClangCL compatibility patches (const + chrono)"
-	@echo "  bitnet-build       Generate TL2 kernels, cmake configure (ClangCL), cmake build"
+	@echo "  bitnet-patch       Apply ClangCL compatibility patches (const + chrono + converter)"
+	@echo "  bitnet-build       Generate TL2 kernels (2B-4T), cmake configure (ClangCL), cmake build"
 	@echo "  bitnet-model       Download safetensors, convert to f32 GGUF, quantize to i2_s"
 	@echo "  bitnet-verify      Quick inference smoke-test (requires completed setup)"
 	@echo "  bitnet-clean       Delete \$$(BITNET_DIR)"
@@ -98,18 +98,17 @@ run:
 
 # ── Benchmarks ─────────────────────────────────────────────────────────────────
 
-BINARY ?= build/bin/llama-cli
-MODEL  ?= models/BitNet-b1.58-2B4T/ggml-model-i2_s.gguf
+MODEL   ?= $(BITNET_DIR)/models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf
 THREADS ?= 4
-RUNS ?= 5
 
 benchmark:
-	poetry run python scripts/metrics_tracker.py \
-		--binary $(BINARY) --model $(MODEL) \
-		--threads $(THREADS) --runs $(RUNS)
+	python scripts/metrics_tracker.py \
+		--bitnet-dir $(BITNET_DIR) \
+		--model $(MODEL) \
+		--threads $(THREADS)
 
 plots:
-	poetry run python scripts/compare_runs.py
+	python scripts/compare_runs.py
 
 # ── BitNet environment setup ───────────────────────────────────────────────────
 #
@@ -145,22 +144,26 @@ bitnet-deps:
 	cd $(BITNET_DIR) && pip install -r requirements.txt
 	cd $(BITNET_DIR) && pip install 3rdparty/llama.cpp/gguf-py
 
-# ClangCL compatibility patches required for commit $(BITNET_COMMIT) on LLVM 18+:
-#   patches/bitnet-clangcl-const.patch  — adds const to y_col pointer (ggml-bitnet-mad.cpp)
-#   patches/llama-chrono.patch          — adds missing <chrono> include (common.cpp and log.cpp)
+# Patches required for commit $(BITNET_COMMIT):
+#   patches/bitnet-clangcl-const.patch       — adds const to y_col pointer (ggml-bitnet-mad.cpp); ClangCL on LLVM 18+
+#   patches/llama-chrono.patch               — adds missing <chrono> include (common.cpp and log.cpp); ClangCL on LLVM 18+
+#   patches/llama-chrono-examples.patch      — adds missing <chrono> include (imatrix.cpp and perplexity.cpp); ClangCL on LLVM 18+
+#   patches/bitnet-converter-arch-name.patch — BitNetForCausalLM alias + vocab fallback + weight_scale unpack for 2B-4T
 bitnet-patch:
 	cd $(BITNET_DIR) && git apply $(CURDIR)/patches/bitnet-clangcl-const.patch
 	cd $(BITNET_DIR)/3rdparty/llama.cpp && git apply $(CURDIR)/patches/llama-chrono.patch
+	cd $(BITNET_DIR)/3rdparty/llama.cpp && git apply $(CURDIR)/patches/llama-chrono-examples.patch
+	cd $(BITNET_DIR) && git apply $(CURDIR)/patches/bitnet-converter-arch-name.patch
 
 bitnet-build:
 	cd $(BITNET_DIR) && python utils/codegen_tl2.py \
 		--model bitnet_b1_58-3B --BM 160,320,320 --BK 96,96,96 --bm 32,32,32
-	cd $(BITNET_DIR) && cmake -B build -DBITNET_X86_TL2=OFF \
-		-T ClangCL -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+	cd $(BITNET_DIR) && cmake -B build -DBITNET_X86_TL2=ON \
+		-T ClangCL
 	cd $(BITNET_DIR) && cmake --build build --config Release
 
 bitnet-model:
-	cd $(BITNET_DIR) && huggingface-cli download microsoft/BitNet-b1.58-2B-4T \
+	cd $(BITNET_DIR) && hf download microsoft/BitNet-b1.58-2B-4T \
 		--local-dir $(BITNET_MODEL)
 	cd $(BITNET_DIR) && python utils/convert-hf-to-gguf-bitnet.py \
 		$(BITNET_MODEL) --outtype f32
