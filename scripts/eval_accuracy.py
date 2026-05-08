@@ -1,13 +1,18 @@
 """
 eval_accuracy.py — Evaluate BitNet b1.58 2B4T on multiple-choice benchmarks.
 
-Uses the native llama-server /completion API with first-token log-probability
-scoring: for each choice we query P(first_token_of_choice | context) and pick
-the choice with highest probability. This is standard for 0-shot multiple-choice
-evaluation and matches the effective scoring strategy used in the BitNet paper
-for tasks where choices begin with distinct tokens.
+Two scoring strategies are used depending on the task:
 
-For MMLU we score the single-character answer token (A/B/C/D) directly.
+  First-token scoring (ARC, MMLU):
+    Query P(first_token_of_choice | context) and pick the highest.  Works well
+    when choices begin with distinct single tokens (letter labels A/B/C/D).
+
+  Continuation scoring (WinoGrande, HellaSwag):
+    Compute sum of log P(token_i | context + tokens_0..i-1) over all tokens in
+    each candidate continuation, then pick the highest.  HellaSwag scores are
+    additionally normalized by token count to remove length bias.  This matches
+    the methodology used in the BitNet paper for these two tasks and produces
+    meaningful scores rather than near-random letter-guessing.
 
 Supported tasks: arc_easy, arc_challenge, winogrande, hellaswag, mmlu
 
@@ -112,56 +117,95 @@ def _decode_tok_str(tok_str: str) -> str:
     return tok_str.replace("Ġ", " ").replace("▁", " ")
 
 
-def first_token_logprob(server: str, context: str, choice: str, n_probs: int = 100) -> float:
-    """
-    Return log P(first_token_of_choice | context) using the native /completion API.
+def _query_completion(server: str, context: str, n_probs: int) -> list | None:
+    """POST one /completion request; return top-token list or None on failure."""
+    for attempt in range(3):
+        try:
+            r = requests.post(f"{server}/completion", json={
+                "prompt": context,
+                "n_predict": 1,
+                "n_probs": n_probs,
+                "temperature": 0.0,
+            }, timeout=60)
+            probs_list = r.json().get("completion_probabilities", [])
+            return probs_list[0]["probs"] if probs_list else []
+        except requests.exceptions.ConnectionError:
+            if attempt < 2:
+                restarted = ensure_server(server)
+                time.sleep(3 if restarted else 1)
+                continue
+            return None
+        except Exception:
+            return None
+    return None
 
-    Queries the server for the top-n_probs tokens at position len(context) and finds
-    the token whose decoded string is the longest prefix of `choice`. This correctly
-    handles BPE representations such as Ġ (leading space) used by LLaMA-3 tokenizer.
-    Returns -inf if no matching token is found in top-n_probs.
+
+def _best_prefix_match(top_tokens: list, target: str) -> tuple[float, str]:
+    """
+    Find the token in top_tokens whose decoded form is the longest prefix of
+    target.  Returns (log_prob, matched_text) or (float('-inf'), '') if none match.
     """
     import math
-    try:
-        for attempt in range(3):
-            try:
-                r = requests.post(f"{server}/completion", json={
-                    "prompt": context,
-                    "n_predict": 1,
-                    "n_probs": n_probs,
-                    "temperature": 0.0,
-                }, timeout=60)
-                data = r.json()
-                break
-            except requests.exceptions.ConnectionError:
-                if attempt < 2:
-                    restarted = ensure_server(server)
-                    time.sleep(3 if restarted else 1)
-                    continue
-                return float("-inf")
-            except Exception:
-                return float("-inf")
-        else:
-            return float("-inf")
+    best_prob = None
+    best_len = 0
+    best_decoded = ""
+    for entry in top_tokens:
+        decoded = _decode_tok_str(entry["tok_str"])
+        if decoded and target.startswith(decoded) and len(decoded) > best_len:
+            best_prob = entry["prob"]
+            best_len = len(decoded)
+            best_decoded = decoded
+    if best_prob is not None:
+        return math.log(max(best_prob, 1e-10)), best_decoded
+    return float("-inf"), ""
 
-        probs_list = data.get("completion_probabilities", [])
-        if not probs_list:
-            return float("-inf")
-        top_tokens = probs_list[0]["probs"]
 
-        best_prob = None
-        best_len = 0
-        for entry in top_tokens:
-            decoded = _decode_tok_str(entry["tok_str"])
-            if decoded and choice.startswith(decoded) and len(decoded) > best_len:
-                best_prob = entry["prob"]
-                best_len = len(decoded)
-
-        if best_prob is not None:
-            return math.log(max(best_prob, 1e-10))
+def first_token_logprob(server: str, context: str, choice: str, n_probs: int = 100) -> float:
+    """Return log P(first token of choice | context).  Used by ARC and MMLU."""
+    top_tokens = _query_completion(server, context, n_probs)
+    if not top_tokens:
         return float("-inf")
-    except Exception:
+    logp, _ = _best_prefix_match(top_tokens, choice)
+    return logp
+
+
+def continuation_logprob(
+    server: str, context: str, continuation: str, normalize: bool = False
+) -> float:
+    """
+    Return sum of log P(token_i | context + tokens_0..i-1) over every token in
+    `continuation`, making one API call per token.
+
+    If normalize=True the sum is divided by token count (use for HellaSwag to
+    remove length bias between candidate endings of unequal length).
+
+    The leading space in `continuation` should encode the word-boundary: BPE
+    tokenizers represent word-initial tokens with a Ġ prefix (decoded as " "),
+    so pass " " + word rather than just word when the continuation begins a new
+    word after a non-space context.
+    """
+    total = 0.0
+    n_tokens = 0
+    current_ctx = context
+    remaining = continuation
+
+    while remaining:
+        if not remaining.strip():
+            break
+        top_tokens = _query_completion(server, current_ctx, n_probs=500)
+        if top_tokens is None:
+            return float("-inf")
+        logp, consumed = _best_prefix_match(top_tokens, remaining)
+        if logp == float("-inf") or not consumed:
+            return float("-inf")
+        total += logp
+        current_ctx += consumed
+        remaining = remaining[len(consumed):]
+        n_tokens += 1
+
+    if n_tokens == 0:
         return float("-inf")
+    return total / n_tokens if normalize else total
 
 
 # ---------------------------------------------------------------------------
@@ -208,17 +252,22 @@ def load_winogrande(limit: int | None):
 
 
 def eval_winogrande(ds, server: str) -> dict:
+    """
+    Continuation scoring: score each option as a direct completion of the sentence
+    prefix (text before the blank).  Strip the trailing space from the prefix and
+    prepend it to the option so the BPE Ġ word-boundary token aligns correctly.
+    """
     correct = 0
     skipped = 0
     for row in ds:
-        display_sent = row["sentence"].replace("_", "___")
-        context = f"{display_sent}\nA. {row['option1']}\nB. {row['option2']}\nAnswer:"
-        sA = first_token_logprob(server, context, " A")
-        sB = first_token_logprob(server, context, " B")
-        if sA == float("-inf") and sB == float("-inf"):
+        prefix = row["sentence"].split("_")[0].rstrip()
+        s1 = continuation_logprob(server, prefix, " " + row["option1"])
+        s2 = continuation_logprob(server, prefix, " " + row["option2"])
+        if s1 == float("-inf") and s2 == float("-inf"):
             skipped += 1
             continue
-        if ("1" if sA >= sB else "2") == row["answer"]:
+        pred = "1" if s1 >= s2 else "2"
+        if pred == row["answer"]:
             correct += 1
     n = len(ds) - skipped
     return {"accuracy": round(correct / n * 100, 2) if n else 0.0,
@@ -234,13 +283,17 @@ def load_hellaswag(limit: int | None):
 
 
 def eval_hellaswag(ds, server: str) -> dict:
-    letters = ["A", "B", "C", "D"]
+    """
+    Continuation scoring with length normalization: score each ending as a
+    completion of ctx, normalized by token count to remove length bias between
+    endings of unequal length.
+    """
     correct = 0
     skipped = 0
     for row in ds:
-        opt_lines = "\n".join(f"{l}. {e}" for l, e in zip(letters, row["endings"]))
-        context = f"{row['ctx']}\n{opt_lines}\nAnswer:"
-        scores = [first_token_logprob(server, context, " " + l) for l in letters]
+        context = row["ctx"]
+        scores = [continuation_logprob(server, context, " " + e, normalize=True)
+                  for e in row["endings"]]
         if all(s == float("-inf") for s in scores):
             skipped += 1
             continue
