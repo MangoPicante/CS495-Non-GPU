@@ -31,12 +31,12 @@ An independent reproduction and extension of Microsoft's published inference ben
 
 ### Phase 1 — Repository Study
 
-- [x] Clone and explore the [microsoft/BitNet](https://github.com/microsoft/BitNet) repository
-- [x] Read and annotate the [BitNet b1.58 paper (Ma et al., 2024)](https://podcast.aiedus.org/uploads/pdf/pdf-1759573772863-893673714.pdf)
-- [x] Read and annotate the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
-- [ ] Create @REPORT.md documenting the absmean quantization function and Straight-Through Estimator
-- [ ] Add a summary to @REPORT.md of published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
-- [x] Confirm benchmark target: BitNet b1.58 2B4T via `bitnet.cpp`
+- [x] Clone the [microsoft/BitNet](https://github.com/microsoft/BitNet) repository
+- [ ] Create @BITNET_SUMMARY.md to describe the model
+  - [x] Summarize the [BitNet b1.58 paper (Ma et al., 2024)](https://podcast.aiedus.org/uploads/pdf/pdf-1759573772863-893673714.pdf)
+  - [x] Summarize the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
+  - [ ] Document the absmean quantization function and Straight-Through Estimator in @BITNET_SUMMARY.md
+  - [ ] Summarize published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
 
 ### Phase 2 — Environment Setup & Model Acquisition
 
