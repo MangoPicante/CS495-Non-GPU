@@ -10,7 +10,7 @@
 
 | Dependency | Location |
 | --- | --- |
-| `bitnet.cpp` (built) | `../BitNet` (external — outside this repo) |
+| `bitnet.cpp` (built) | `../Models/BitNet` (external — outside this repo) |
 
 ### Description
 

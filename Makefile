@@ -1,182 +1,143 @@
-PYTHON     := py -3.13
-VENV_DIR   := .venv
-VENV_BIN   := $(VENV_DIR)/Scripts
-ACTIVATE   := . $(VENV_BIN)/activate
+PYTHON     := py -3.11
+THREADS    ?= 4
+
+BITNET_DIR    ?= ../Models/BitNet
+BITNET_COMMIT := 01eb415772c342d9f20dc42772f1583ae1e5b102  # HEAD as of May 2026; pinned for reproducibility
+BITNET_MODEL  := models/BitNet-b1.58-2B-4T
+BITNET_QUANT  := i2_s
+MODEL         ?= $(BITNET_DIR)/$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv install install-dev update test lint format type-check check clean nuke run benchmark plots
+.PHONY: help \
+        bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
+        bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
+        benchmark
 
 help:
 	@echo "Usage: make <target>"
 	@echo ""
-	@echo "Project tooling:"
-	@echo "  venv         Create .venv with Python 3.13"
-	@echo "  install      Install production dependencies via Poetry into .venv"
-	@echo "  install-dev  Install all dependencies (including dev) via Poetry into .venv"
-	@echo "  update       Update dependencies to latest allowed versions"
-	@echo "  test         Run pytest"
-	@echo "  lint         Run ruff linter"
-	@echo "  format       Auto-format with ruff"
-	@echo "  type-check   Run mypy"
-	@echo "  check        lint + type-check + test"
-	@echo "  clean        Remove __pycache__, .pytest_cache, *.pyc"
-	@echo "  nuke         Remove .venv and clean"
-	@echo "  run          Run the package entry point"
-	@echo "  benchmark    Run inference benchmark (set BITNET_DIR=, MODEL=, THREADS=)"
-	@echo "  plots        Generate comparison plots from results/"
+	@echo "BitNet environment setup (run bitnet-setup for the full pipeline):"
+	@echo "  bitnet-setup        clone + submodules + deps + patch + build"
+	@echo "  bitnet-clone        git clone microsoft/BitNet into \$$(BITNET_DIR)"
+	@echo "  bitnet-submodules   git submodule update --init --recursive"
+	@echo "  bitnet-deps         Install Python 3.11 deps + gguf-py"
+	@echo "  bitnet-patch        Apply ClangCL / chrono compatibility patches"
+	@echo "  bitnet-build        Generate TL2 kernels, cmake configure + build"
+	@echo "  bitnet-model        Download pre-built i2_s GGUF from microsoft/BitNet-b1.58-2B-4T-gguf"
+	@echo "  bitnet-verify       Quick inference smoke-test"
+	@echo "  bitnet-clean        Remove \$$(BITNET_DIR)"
 	@echo ""
-	@echo "BitNet environment setup:"
-	@echo "  bitnet-setup       Full pipeline: clone + pin commit + submodules + deps + build + model"
-	@echo "  bitnet-clone       git clone microsoft/BitNet into \$$(BITNET_DIR)"
-	@echo "  bitnet-checkout    Pin repo to commit \$$(BITNET_COMMIT)"
-	@echo "  bitnet-submodules  git submodule update --init --recursive"
-	@echo "  bitnet-deps        pip install requirements + gguf-py"
-	@echo "  bitnet-patch       Apply ClangCL compatibility patches (const + chrono + converter)"
-	@echo "  bitnet-build       Generate TL2 kernels (2B-4T), cmake configure (ClangCL), cmake build"
-	@echo "  bitnet-model       Download safetensors, convert to f32 GGUF, quantize to i2_s"
-	@echo "  bitnet-verify      Quick inference smoke-test (requires completed setup)"
-	@echo "  bitnet-clean       Delete \$$(BITNET_DIR)"
+	@echo "Benchmarks:"
+	@echo "  benchmark           Run inference latency/throughput/memory benchmark"
 	@echo ""
-	@echo "  Override BITNET_DIR to target a different path, e.g.:"
-	@echo "    make bitnet-setup BITNET_DIR=../BitNet2"
-
-# ── Environment ────────────────────────────────────────────────────────────────
-
-$(VENV_DIR):
-	$(PYTHON) -m venv $(VENV_DIR)
-	$(VENV_BIN)/python -m pip install --upgrade pip
-
-venv: $(VENV_DIR)
-
-# Tell Poetry to use the .venv we created (in-project venv)
-install: $(VENV_DIR)
-	poetry config virtualenvs.in-project true
-	poetry env use $(VENV_DIR)/Scripts/python.exe
-	poetry install --only main
-
-install-dev: $(VENV_DIR)
-	poetry config virtualenvs.in-project true
-	poetry env use $(VENV_DIR)/Scripts/python.exe
-	poetry install
-
-update: $(VENV_DIR)
-	poetry update
-
-# ── Quality ────────────────────────────────────────────────────────────────────
-
-test:
-	poetry run pytest -v
-
-lint:
-	poetry run ruff check .
-
-format:
-	poetry run ruff format .
-
-type-check:
-	poetry run mypy .
-
-check: lint type-check test
-
-# ── Housekeeping ───────────────────────────────────────────────────────────────
-
-clean:
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type d -name .pytest_cache -exec rm -rf {} +
-	find . -type d -name .mypy_cache  -exec rm -rf {} +
-	find . -type d -name .ruff_cache  -exec rm -rf {} +
-	find . -name "*.pyc" -delete
-
-nuke: clean
-	rm -rf $(VENV_DIR)
-
-# ── Run ────────────────────────────────────────────────────────────────────────
-
-run:
-	poetry run python -m cs495_non_gpu
-
-# ── Benchmarks ─────────────────────────────────────────────────────────────────
-
-MODEL   ?= $(BITNET_DIR)/models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf
-THREADS ?= 4
-
-benchmark:
-	python scripts/metrics_tracker.py \
-		--bitnet-dir $(BITNET_DIR) \
-		--model $(MODEL) \
-		--threads $(THREADS)
-
-plots:
-	python scripts/compare_runs.py
+	@echo "Override destination:  make bitnet-setup BITNET_DIR=../Other/Path"
 
 # ── BitNet environment setup ───────────────────────────────────────────────────
 #
-# Reproducibly clones and builds bitnet.cpp at the exact commit used in this
-# project's benchmarks. Run `make bitnet-setup` to perform the full pipeline,
-# or run individual targets to repeat specific steps.
+# Tested on: Windows 11, Visual Studio 18 (2026), ClangCL 20.1.8, cmake 4.3.2
+# Tested commit: $(BITNET_COMMIT)  (HEAD of microsoft/BitNet as of May 2026)
 #
-# Requirements: git, Python 3.11+, CMake 3.22+,
-#               Clang 18+ or Visual Studio 2022 with C++ workload
-#
-# Override destination:  make bitnet-setup BITNET_DIR=../MyBitNet
+# Requirements:
+#   - git, cmake >= 3.22
+#   - Visual Studio 2022+ with:
+#       Desktop development with C++
+#       C++ Clang Compiler for Windows  (installs ClangCL)
+#       MS-Build Support for LLVM-Toolset
+#   - Python 3.11  (py -3.11)
+#     Python 3.13 fails: numpy~=1.26.4 has no wheel for 3.13+.
+#   - hf  (huggingface_hub CLI, for bitnet-model)
 
-BITNET_DIR    ?= ../BitNet2
-BITNET_COMMIT := 01eb415772c342d9f20dc42772f1583ae1e5b102
-BITNET_MODEL  := models/BitNet-b1.58-2B-4T
-BITNET_QUANT  := i2_s
-
-.PHONY: bitnet-setup bitnet-clone bitnet-checkout bitnet-submodules bitnet-deps bitnet-patch bitnet-build bitnet-verify bitnet-clean
-
-bitnet-setup: bitnet-clone bitnet-checkout bitnet-submodules bitnet-deps bitnet-patch bitnet-build bitnet-model
-	@echo "BitNet setup complete in $(BITNET_DIR)"
+bitnet-setup: bitnet-clone bitnet-submodules bitnet-deps bitnet-patch bitnet-build
+	@echo "BitNet build complete in $(BITNET_DIR)"
+	@echo "Run 'make bitnet-model' to download the 2B4T weights."
 
 bitnet-clone:
 	git clone https://github.com/microsoft/BitNet.git $(BITNET_DIR)
-
-bitnet-checkout:
 	cd $(BITNET_DIR) && git checkout $(BITNET_COMMIT)
 
 bitnet-submodules:
 	cd $(BITNET_DIR) && git submodule update --init --recursive
 
+# py -3.11 is required throughout.  numpy~=1.26.4 (pinned in requirements.txt)
+# has no pre-built wheel for Python 3.13+; building from source fails under
+# ClangCL due to C99 complex-type compatibility errors.
+# --only-binary=:all: prevents pip from falling back to source compilation.
 bitnet-deps:
-	cd $(BITNET_DIR) && pip install -r requirements.txt
-	cd $(BITNET_DIR) && pip install 3rdparty/llama.cpp/gguf-py
+	cd $(BITNET_DIR) && $(PYTHON) -m pip install -r requirements.txt --only-binary=:all:
+	cd $(BITNET_DIR) && $(PYTHON) -m pip install 3rdparty/llama.cpp/gguf-py
 
-# Patches required for commit $(BITNET_COMMIT):
-#   patches/bitnet-clangcl-const.patch       — adds const to y_col pointer (ggml-bitnet-mad.cpp); ClangCL on LLVM 18+
-#   patches/llama-chrono.patch               — adds missing <chrono> include (common.cpp and log.cpp); ClangCL on LLVM 18+
-#   patches/llama-chrono-examples.patch      — adds missing <chrono> include (imatrix.cpp and perplexity.cpp); ClangCL on LLVM 18+
-#   patches/bitnet-converter-arch-name.patch — BitNetForCausalLM alias + vocab fallback + weight_scale unpack for 2B-4T
+# Three patches are required at commit $(BITNET_COMMIT) when building with
+# ClangCL 18+ on Windows.  Each is a minimal git-format patch stored in
+# patches/ so it can be replayed cleanly with 'git apply'.
+#
+# patches/bitnet-clangcl-const.patch  — applied to the BitNet repo
+#   src/ggml-bitnet-mad.cpp:811
+#   'int8_t * y_col = y + col * by' initialises a non-const pointer from a
+#   const pointer.  MSVC (cl.exe) emits C4090 and continues; ClangCL 20+
+#   treats this as a hard error.  Adding 'const' fixes it.
+#   Compiler-flag workarounds tried and ruled out:
+#     -Wno-error            — only downgrades promoted warnings, not hard errors
+#     /clang:-fpermissive   — no effect on C++ const-correctness errors
+#
+# patches/llama-chrono.patch  — applied to 3rdparty/llama.cpp
+#   common/common.cpp, common/log.cpp
+#   Both files use std::chrono but omit '#include <chrono>'.  Under MSVC the
+#   header is pulled in transitively; ClangCL is stricter.
+#
+# patches/llama-chrono-examples.patch  — applied to 3rdparty/llama.cpp
+#   examples/imatrix/imatrix.cpp, examples/perplexity/perplexity.cpp
+#   Same missing '#include <chrono>' in the example binaries.
 bitnet-patch:
 	cd $(BITNET_DIR) && git apply $(CURDIR)/patches/bitnet-clangcl-const.patch
 	cd $(BITNET_DIR)/3rdparty/llama.cpp && git apply $(CURDIR)/patches/llama-chrono.patch
 	cd $(BITNET_DIR)/3rdparty/llama.cpp && git apply $(CURDIR)/patches/llama-chrono-examples.patch
-	cd $(BITNET_DIR) && git apply $(CURDIR)/patches/bitnet-converter-arch-name.patch
 
+# codegen_tl2.py generates include/bitnet-lut-kernels.h and
+# include/kernel_config.ini for the 2B-4T model shape.  (src/ggml-bitnet-mad.cpp
+# and src/ggml-bitnet-lut.cpp are already in the repo; only the header is
+# generated.)
+# cmake -T ClangCL selects the Clang-CL toolchain via the VS generator.
+# /EHsc enables C++ exception handling, which ClangCL disables by default but
+# llama.cpp requires (it uses throw/catch throughout llama.cpp).
+# MSYS_NO_PATHCONV=1 prevents git bash from converting the /EHsc flag to a
+# Windows path (C:/Program Files/Git/EHsc) — not needed under PowerShell.
 bitnet-build:
-	cd $(BITNET_DIR) && python utils/codegen_tl2.py \
+	cd $(BITNET_DIR) && $(PYTHON) utils/codegen_tl2.py \
 		--model bitnet_b1_58-3B --BM 160,320,320 --BK 96,96,96 --bm 32,32,32
-	cd $(BITNET_DIR) && cmake -B build -DBITNET_X86_TL2=ON \
-		-T ClangCL
+	cd $(BITNET_DIR) && MSYS_NO_PATHCONV=1 cmake -B build -DBITNET_X86_TL2=ON \
+		-T ClangCL \
+		"-DCMAKE_CXX_FLAGS=/EHsc"
 	cd $(BITNET_DIR) && cmake --build build --config Release
 
+# ── Model download ─────────────────────────────────────────────────────────────
+#
+# The microsoft/BitNet-b1.58-2B-4T-gguf repo ships a ready-to-use
+# ggml-model-i2_s.gguf, so no conversion or re-quantization is needed.
+# (The safetensors repo microsoft/BitNet-b1.58-2B-4T stores weights in a
+# pre-quantized uint8+scale format that the standard converter cannot handle
+# without the weight_scale unpacking logic; the GGUF repo sidesteps this.)
+
 bitnet-model:
-	cd $(BITNET_DIR) && hf download microsoft/BitNet-b1.58-2B-4T \
-		--local-dir $(BITNET_MODEL)
-	cd $(BITNET_DIR) && python utils/convert-hf-to-gguf-bitnet.py \
-		$(BITNET_MODEL) --outtype f32
-	cd $(BITNET_DIR) && build/bin/Release/llama-quantize \
-		$(BITNET_MODEL)/ggml-model-f32.gguf \
-		$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf I2_S 1
+	hf download microsoft/BitNet-b1.58-2B-4T-gguf \
+		--local-dir $(BITNET_DIR)/$(BITNET_MODEL)
+
+# ── Verify / Benchmark ─────────────────────────────────────────────────────────
 
 bitnet-verify:
-	cd $(BITNET_DIR) && python run_inference.py \
+	cd $(BITNET_DIR) && $(PYTHON) run_inference.py \
 		-m $(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf \
 		-p "What is 2+2?" \
 		-n 32 \
 		-t $(THREADS)
+
+benchmark:
+	$(PYTHON) scripts/metrics_tracker.py \
+		--bitnet-dir $(BITNET_DIR) \
+		--model $(MODEL) \
+		--threads $(THREADS)
+
+# ── Housekeeping ───────────────────────────────────────────────────────────────
 
 bitnet-clean:
 	rm -rf $(BITNET_DIR)
