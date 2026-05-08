@@ -61,7 +61,7 @@ An independent reproduction and extension of Microsoft's published inference ben
 - [x] Compile local benchmark results alongside published FP16 baselines (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) into @comparison_table.csv
 - [x] Run `scripts/compare_runs.py` (`make plots`) to generate throughput, memory, and accuracy comparison plots
 - [x] Compute cost-accuracy trade-off (dollar cost proxy: time × hardware rate)
-- [ ] Estimate carbon footprint using CodeCarbon measurements (falling back to TDP proxy if unavailable) and compare against FP16 estimates from the literature
+- [ ] Estimate carbon footprint using CodeCarbon measurements and compare against FP16 estimates from the literature
 - [ ] Produce final benchmark dashboard (plots + @comparison_table.csv) in @FINAL_REPORT.md
 
 ### Phase 5 — Optimization & Writeup
