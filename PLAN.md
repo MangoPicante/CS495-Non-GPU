@@ -32,8 +32,8 @@ An independent reproduction and extension of Microsoft's published inference ben
 ### Phase 1 — Repository Study
 
 - [ ] Create @BITNET_SUMMARY.md to describe the model
-  - [x] Summarize the [BitNet b1.58 paper (Ma et al., 2024)](https://podcast.aiedus.org/uploads/pdf/pdf-1759573772863-893673714.pdf)
-  - [x] Summarize the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
+  - [ ] Summarize the [BitNet b1.58 paper (Ma et al., 2024)](https://podcast.aiedus.org/uploads/pdf/pdf-1759573772863-893673714.pdf)
+  - [ ] Summarize the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
   - [ ] Document the absmean quantization function and Straight-Through Estimator in @BITNET_SUMMARY.md
   - [ ] Document published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
 
@@ -55,7 +55,6 @@ An independent reproduction and extension of Microsoft's published inference ben
   - Invokes `llama-bench` with `--output json`; monitors peak RSS via `psutil`
   - Optional energy tracking via CodeCarbon; appends rows to `results/step_metrics.csv`
 - [ ] Run a smoke test to confirm that all scripts run and metrics are being properly recorded
-
 
 ### Phase 3 — Inference Benchmarking
 
