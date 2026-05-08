@@ -54,7 +54,7 @@ An independent reproduction and extension of Microsoft's published inference ben
 - [x] Set up `scripts/metrics_tracker.py` to record latency, memory, energy, and throughput per run
   - Invokes `llama-bench` with `--output json`; monitors peak RSS via `psutil`
   - Optional energy tracking via CodeCarbon; appends rows to `results/step_metrics.csv`
-- [ ] Smoke-test scripts/metrics_tracker.py and scripts/eval_accuracy.py to confirm both run without errors and produce well-formed output
+- [x] Smoke-test scripts/metrics_tracker.py and scripts/eval_accuracy.py to confirm both run without errors and produce well-formed output
 
 ### Phase 3 — Inference Benchmarking
 
