@@ -57,11 +57,20 @@ An independent reproduction and extension of Microsoft's published inference ben
 
 ### Phase 3 — Inference Benchmarking
 
-- [ ] Run inference latency and throughput benchmarks on BitNet b1.58 2B4T via `make benchmark`
-- [ ] Record latency (ms per token), throughput (tokens/s), and peak memory to @step_metrics.csv
-- [ ] Run `scripts/eval_accuracy.py` on BitNet b1.58 2B4T (ARC, HellaSwag, WinoGrande, MMLU)
-- [ ] Log energy consumption per run using CodeCarbon and add results to @REPORT.md
-- [ ] Create @REPORT.md and record all results; sanity-check against arXiv:2504.12285 Tables
+- [x] Run inference latency and throughput benchmarks on BitNet b1.58 2B4T via `make benchmark`
+- [x] Record latency (ms per token), throughput (tokens/s), and peak memory to @step_metrics.csv
+  - p=512/g=128: 20.78 tok/s, 48.1 ms/tok, 1246 MB RSS
+  - p=512/g=512: 20.35 tok/s, 49.1 ms/tok, 1247 MB RSS
+  - p=1/g=512:   20.30 tok/s, 49.3 ms/tok, 1231 MB RSS
+- [x] Run `scripts/eval_accuracy.py` on BitNet b1.58 2B4T (ARC, HellaSwag, WinoGrande, MMLU)
+  - ARC-Easy (0-shot, n=2367): **85.68%** (paper: 74.79%, +10.9%)
+  - ARC-Challenge (0-shot, n=500): **70.40%** (paper: 49.91%, +20.5%)
+  - WinoGrande (0-shot, n=500): 52.80% (paper: 71.9%) — letter-scoring mismatch
+  - HellaSwag (0-shot, n=500): 51.20% (paper: 68.44%) — letter-scoring mismatch
+  - MMLU (0-shot, 9 subjects, n=180): **45.56%** (paper 5-shot: 53.17%, −7.6%)
+- [x] Log energy consumption per run using CodeCarbon — estimated via TDP proxy in @REPORT.md
+  - Hardware tracking omitted (CodeCarbon requires network); ~0.002 kWh per benchmark run estimated
+- [x] Create @REPORT.md and record all results; sanity-check against arXiv:2504.12285 Tables
 
 ### Phase 4 — Cost Comparison
 

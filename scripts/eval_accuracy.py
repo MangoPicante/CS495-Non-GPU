@@ -318,19 +318,20 @@ def eval_mmlu_subject(subject: str, server: str, num_fewshot: int, limit: int | 
             "correct": correct, "total": n, "skipped": skipped}
 
 
-def eval_mmlu(server: str, num_fewshot: int, limit: int | None) -> dict:
+def eval_mmlu(server: str, num_fewshot: int, limit: int | None, max_subjects: int | None = None) -> dict:
     all_correct = 0
     all_total = 0
     subject_results = {}
-    for subj in MMLU_SUBJECTS:
+    subjects = MMLU_SUBJECTS[:max_subjects] if max_subjects else MMLU_SUBJECTS
+    for subj in subjects:
         try:
             r = eval_mmlu_subject(subj, server, num_fewshot, limit)
             subject_results[subj] = r
             all_correct += r["correct"]
             all_total += r["total"]
-            print(f"  {subj:45s} {r['accuracy']:5.1f}% ({r['correct']}/{r['total']})")
+            print(f"  {subj:45s} {r['accuracy']:5.1f}% ({r['correct']}/{r['total']})", flush=True)
         except Exception as e:
-            print(f"  {subj:45s} ERROR: {e}")
+            print(f"  {subj:45s} ERROR: {e}", flush=True)
     overall = (all_correct / all_total * 100) if all_total else 0.0
     return {"accuracy": round(overall, 2), "correct": all_correct, "total": all_total,
             "subjects": subject_results}
@@ -347,7 +348,8 @@ def check_server(server: str) -> bool:
         return False
 
 
-def run_task(task: str, server: str, num_fewshot: int, limit: int | None) -> dict:
+def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
+             max_subjects: int | None = None) -> dict:
     t0 = time.time()
     print(f"\n{'='*60}\nTask: {task}  limit={limit}  few-shot={num_fewshot}\n{'='*60}")
     if task in ("arc_easy", "arc_challenge"):
@@ -364,7 +366,7 @@ def run_task(task: str, server: str, num_fewshot: int, limit: int | None) -> dic
         print(f"Loaded {len(ds)} samples")
         result = eval_hellaswag(ds, server)
     elif task == "mmlu":
-        result = eval_mmlu(server, num_fewshot, limit)
+        result = eval_mmlu(server, num_fewshot, limit, max_subjects=max_subjects)
     else:
         raise ValueError(f"Unknown task: {task}")
     elapsed = time.time() - t0
@@ -384,6 +386,8 @@ def main():
                         help="Few-shot count (use 5 for MMLU)")
     parser.add_argument("--limit", type=int, default=None,
                         help="Max samples per task (None = full dataset)")
+    parser.add_argument("--max-subjects", type=int, default=None,
+                        help="Max MMLU subjects to evaluate (default: all 57)")
     parser.add_argument("--server", default="http://127.0.0.1:8080")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--start-server", action="store_true",
@@ -412,7 +416,8 @@ def main():
     all_results = {}
     for task in tasks:
         fewshot = args.num_fewshot if task == "mmlu" else 0
-        all_results[task] = run_task(task, args.server, fewshot, args.limit)
+        all_results[task] = run_task(task, args.server, fewshot, args.limit,
+                                     max_subjects=args.max_subjects if task == "mmlu" else None)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     existing = {}

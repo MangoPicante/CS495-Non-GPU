@@ -30,5 +30,68 @@
     "skipped": 0,
     "elapsed_s": 1954.2,
     "paper_target": 68.44
+  },
+  "mmlu": {
+    "accuracy": 45.56,
+    "correct": 82,
+    "total": 180,
+    "subjects": {
+      "abstract_algebra": {
+        "accuracy": 45.0,
+        "correct": 9,
+        "total": 20,
+        "skipped": 0
+      },
+      "anatomy": {
+        "accuracy": 40.0,
+        "correct": 8,
+        "total": 20,
+        "skipped": 0
+      },
+      "astronomy": {
+        "accuracy": 55.0,
+        "correct": 11,
+        "total": 20,
+        "skipped": 0
+      },
+      "business_ethics": {
+        "accuracy": 65.0,
+        "correct": 13,
+        "total": 20,
+        "skipped": 0
+      },
+      "clinical_knowledge": {
+        "accuracy": 50.0,
+        "correct": 10,
+        "total": 20,
+        "skipped": 0
+      },
+      "college_chemistry": {
+        "accuracy": 35.0,
+        "correct": 7,
+        "total": 20,
+        "skipped": 0
+      },
+      "college_computer_science": {
+        "accuracy": 25.0,
+        "correct": 5,
+        "total": 20,
+        "skipped": 0
+      },
+      "college_mathematics": {
+        "accuracy": 30.0,
+        "correct": 6,
+        "total": 20,
+        "skipped": 0
+      },
+      "college_medicine": {
+        "accuracy": 65.0,
+        "correct": 13,
+        "total": 20,
+        "skipped": 0
+      }
+    },
+    "elapsed_s": 529.4,
+    "paper_target": 53.17
   }
 }
