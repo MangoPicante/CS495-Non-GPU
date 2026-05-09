@@ -3,6 +3,10 @@ POETRY     := poetry
 THREADS    ?= 4
 LIMIT      ?= 500
 
+# vswhere.exe ships with every VS 2017+ install at this fixed location.
+# It is used by check-deps to verify the ClangCL VS components are present.
+VSWHERE := C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe
+
 BITNET_DIR    ?= ../Models/BitNet
 BITNET_COMMIT := 01eb415772c342d9f20dc42772f1583ae1e5b102  # HEAD as of May 2026; pinned for reproducibility
 BITNET_MODEL  := models/BitNet-b1.58-2B-4T
@@ -13,6 +17,7 @@ MODEL         ?= $(BITNET_DIR)/$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf
 
 .PHONY: help \
         venv install install-dev \
+        check-deps \
         bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
         benchmark plots smoke-test \
@@ -27,8 +32,11 @@ help:
 	@echo "  install             Install runtime dependencies (pyproject.toml)"
 	@echo "  install-dev         Install runtime + dev dependencies"
 	@echo ""
+	@echo "Prerequisites:"
+	@echo "  check-deps          Verify cmake, Python 3.11, git, and VS ClangCL are present"
+	@echo ""
 	@echo "BitNet environment setup (run bitnet-setup for the full pipeline):"
-	@echo "  bitnet-setup        clone + submodules + deps + patch + build"
+	@echo "  bitnet-setup        check-deps + clone + submodules + deps + patch + build"
 	@echo "  bitnet-clone        git clone microsoft/BitNet into \$$(BITNET_DIR)"
 	@echo "  bitnet-submodules   git submodule update --init --recursive"
 	@echo "  bitnet-deps         Install Python 3.11 deps + gguf-py"
@@ -65,6 +73,36 @@ install: venv
 install-dev: venv
 	$(POETRY) install
 
+# ── Prerequisites check ───────────────────────────────────────────────────────
+#
+# Fails with a human-readable message if any required tool is missing, rather
+# than letting the build die with a cryptic compiler or cmake error.
+#
+# ClangCL check uses vswhere.exe (ships with every VS 2017+ install at the path
+# defined by VSWHERE above) to confirm both VS components are registered:
+#   Microsoft.VisualStudio.Component.VC.Llvm.Clang       (clang-cl.exe binary)
+#   Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset (MSBuild toolset)
+# Without both, cmake -T ClangCL fails with MSB8020.
+#
+# To install: VS Installer → Modify → Individual components → search "Clang":
+#   [x] C++ Clang Compiler for Windows
+#   [x] MSBuild support for LLVM (clang-cl) toolset
+
+check-deps:
+	@echo "Checking prerequisites..."
+	@cmake --version 2>/dev/null | grep -q cmake \
+	    || { echo "MISSING  cmake >= 3.22  ->  https://cmake.org/download/"; exit 1; }
+	@$(PYTHON) --version 2>/dev/null | grep -q Python \
+	    || { echo "MISSING  Python 3.11   ->  https://www.python.org/downloads/"; exit 1; }
+	@git --version 2>/dev/null | grep -q git \
+	    || { echo "MISSING  git           ->  https://git-scm.com/"; exit 1; }
+	@"$(VSWHERE)" -latest \
+	    -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang \
+	    -requires Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset \
+	    -find "VC/Tools/Llvm/x64/bin/clang-cl.exe" 2>/dev/null | grep -q clang-cl \
+	    || { printf "MISSING  ClangCL not found in Visual Studio.\n         VS Installer > Modify > Individual components:\n           [x] C++ Clang Compiler for Windows\n           [x] MSBuild support for LLVM (clang-cl) toolset\n"; exit 1; }
+	@echo "All prerequisites OK."
+
 # ── BitNet environment setup ───────────────────────────────────────────────────
 #
 # Tested on: Windows 11, Visual Studio 18 (2026), ClangCL 20.1.8, cmake 4.3.2
@@ -80,7 +118,7 @@ install-dev: venv
 #     Python 3.13 fails: numpy~=1.26.4 has no wheel for 3.13+.
 #   - hf  (huggingface_hub CLI, for bitnet-model)
 
-bitnet-setup: bitnet-clone bitnet-submodules bitnet-deps bitnet-patch bitnet-build
+bitnet-setup: check-deps bitnet-clone bitnet-submodules bitnet-deps bitnet-patch bitnet-build
 	@echo "BitNet build complete in $(BITNET_DIR)"
 	@echo "Run 'make bitnet-model' to download the 2B4T weights."
 
