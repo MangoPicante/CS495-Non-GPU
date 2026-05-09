@@ -14,12 +14,16 @@ Usage:
 """
 
 import argparse
+import contextlib
 import csv
+import io
 import json
+import logging
 import os
 import subprocess
 import sys
 import time
+import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -153,7 +157,10 @@ def main():
     tracker = None
     if not args.no_energy:
         try:
-            from codecarbon import EmissionsTracker
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=FutureWarning)
+                from codecarbon import EmissionsTracker
+            logging.getLogger("codecarbon").setLevel(logging.CRITICAL)
             tracker = EmissionsTracker(
                 project_name="bitnet-benchmark",
                 output_dir=str(RESULTS_CSV.parent),
@@ -175,7 +182,10 @@ def main():
         bench_json, peak_rss = run_bench(llama_bench, model, n_prompt, n_gen, args.threads)
 
         if tracker:
-            emissions = tracker.stop()
+            # codecarbon 2.7 has a Windows lock-file bug that spams stderr;
+            # redirect_stderr silences it without affecting our own output.
+            with contextlib.redirect_stderr(io.StringIO()):
+                emissions = tracker.stop()
             co2_kg = float(emissions) if emissions is not None else None
             try:
                 energy_kwh = tracker.final_emissions_data.energy_consumed
