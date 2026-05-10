@@ -13,6 +13,15 @@ BITNET_MODEL  := models/BitNet-b1.58-2B-4T
 BITNET_QUANT  := i2_s
 MODEL         ?= $(BITNET_DIR)/$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf
 
+QWEN_DIR    ?= ../Models/Qwen
+QWEN_REPO   := Qwen/Qwen2.5-1.5B-Instruct-GGUF
+QWEN_QUANT  := q8_0
+QWEN_FILE   := qwen2.5-1.5b-instruct-$(QWEN_QUANT).gguf
+QWEN_MODEL  ?= $(QWEN_DIR)/$(QWEN_FILE)
+
+# Reuse llama.cpp binaries already compiled inside the BitNet build tree.
+LLAMA_CLI   ?= $(BITNET_DIR)/build/bin/Release/llama-cli.exe
+
 .DEFAULT_GOAL := help
 
 .PHONY: help \
@@ -20,6 +29,7 @@ MODEL         ?= $(BITNET_DIR)/$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf
         check-deps \
         bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
+        qwen-model qwen-verify qwen-clean \
         benchmark plots smoke-test \
         eval-winogrande eval-hellaswag \
         clean nuke
@@ -46,6 +56,11 @@ help:
 	@echo "  bitnet-verify       Quick inference smoke-test"
 	@echo "  bitnet-clean        Remove \$$(BITNET_DIR)"
 	@echo ""
+	@echo "Qwen2.5 1.5B baseline (FP16 proxy; reuses BitNet's llama.cpp build):"
+	@echo "  qwen-model          Download Qwen2.5-1.5B-Instruct Q8_0 GGUF into \$$(QWEN_DIR)"
+	@echo "  qwen-verify         Quick inference smoke-test with llama-cli"
+	@echo "  qwen-clean          Remove \$$(QWEN_DIR)"
+	@echo ""
 	@echo "Benchmarks & analysis:"
 	@echo "  benchmark           Run inference benchmark (latency, throughput, memory, energy)"
 	@echo "  eval-winogrande     Run WinoGrande eval with continuation scoring (LIMIT=$(LIMIT))"
@@ -59,6 +74,7 @@ help:
 	@echo ""
 	@echo "Overrides:"
 	@echo "  BITNET_DIR=../Other/Path   (default: $(BITNET_DIR))"
+	@echo "  QWEN_DIR=../Other/Path     (default: $(QWEN_DIR))"
 	@echo "  THREADS=8                  (default: $(THREADS))"
 	@echo "  LIMIT=100                  (default: $(LIMIT), applies to eval targets)"
 
@@ -230,6 +246,33 @@ plots:
 
 smoke-test:
 	$(POETRY) run python scripts/smoke_test.py
+
+# ── Qwen2.5 1.5B baseline ─────────────────────────────────────────────────────
+#
+# No separate C++ build is needed: llama-cli.exe is reused from the BitNet
+# build tree ($(LLAMA_CLI)).  Run 'make bitnet-build' first if it is absent.
+#
+# Q8_0 (1.89 GB) is the quantization closest to FP16 accuracy, chosen so
+# that accuracy comparisons against the published FP16 baselines are as
+# fair as possible without requiring a full F16 download (~3 GB).
+#
+# Requirements:
+#   - hf  (huggingface_hub CLI)
+#   - BitNet already built  (provides llama-cli.exe at $(LLAMA_CLI))
+
+qwen-model:
+	hf download $(QWEN_REPO) $(QWEN_FILE) \
+		--local-dir $(QWEN_DIR)
+
+qwen-verify:
+	$(LLAMA_CLI) \
+		-m $(QWEN_MODEL) \
+		-p "What is 2+2?" \
+		-n 32 \
+		-t $(THREADS)
+
+qwen-clean:
+	rm -rf $(QWEN_DIR)
 
 # ── Housekeeping ───────────────────────────────────────────────────────────────
 
