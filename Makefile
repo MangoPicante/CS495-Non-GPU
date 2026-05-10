@@ -13,14 +13,16 @@ BITNET_MODEL  := models/BitNet-b1.58-2B-4T
 BITNET_QUANT  := i2_s
 MODEL         ?= $(BITNET_DIR)/$(BITNET_MODEL)/ggml-model-$(BITNET_QUANT).gguf
 
-QWEN_DIR    ?= ../Models/Qwen
-QWEN_REPO   := Qwen/Qwen2.5-1.5B-Instruct-GGUF
-QWEN_QUANT  := q8_0
-QWEN_FILE   := qwen2.5-1.5b-instruct-$(QWEN_QUANT).gguf
-QWEN_MODEL  ?= $(QWEN_DIR)/$(QWEN_FILE)
-
-# Reuse llama.cpp binaries already compiled inside the BitNet build tree.
-LLAMA_CLI   ?= $(BITNET_DIR)/build/bin/Release/llama-cli.exe
+QWEN_DIR           ?= ../Models/Qwen
+QWEN_REPO          := Qwen/Qwen2.5-1.5B-Instruct-GGUF
+QWEN_QUANT         := q8_0
+QWEN_FILE          := qwen2.5-1.5b-instruct-$(QWEN_QUANT).gguf
+QWEN_MODEL         ?= $(QWEN_DIR)/$(QWEN_FILE)
+QWEN_LLAMACPP_DIR  := $(QWEN_DIR)/llama.cpp
+QWEN_LLAMACPP_REPO := https://github.com/ggml-org/llama.cpp.git
+QWEN_LLAMACPP_COMMIT := 1e5ad35d560b90a8ac447d149c8f8447ae1fcaa0  # HEAD as of May 2026; pinned for reproducibility
+QWEN_CLI           ?= $(QWEN_LLAMACPP_DIR)/build/bin/Release/llama-cli.exe
+QWEN_SERVER        ?= $(QWEN_LLAMACPP_DIR)/build/bin/Release/llama-server.exe
 
 .DEFAULT_GOAL := help
 
@@ -29,7 +31,7 @@ LLAMA_CLI   ?= $(BITNET_DIR)/build/bin/Release/llama-cli.exe
         check-deps \
         bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
-        qwen-model qwen-verify qwen-clean \
+        qwen-setup qwen-clone qwen-build qwen-model qwen-verify qwen-clean \
         benchmark plots smoke-test \
         eval-winogrande eval-hellaswag \
         clean nuke
@@ -56,9 +58,12 @@ help:
 	@echo "  bitnet-verify       Quick inference smoke-test"
 	@echo "  bitnet-clean        Remove \$$(BITNET_DIR)"
 	@echo ""
-	@echo "Qwen2.5 1.5B baseline (FP16 proxy; reuses BitNet's llama.cpp build):"
+	@echo "Qwen2.5 1.5B baseline (fully independent of BitNet):"
+	@echo "  qwen-setup          clone + build + model (full pipeline)"
+	@echo "  qwen-clone          git clone ggml-org/llama.cpp into \$$(QWEN_LLAMACPP_DIR)"
+	@echo "  qwen-build          cmake configure + build (MSVC, no ClangCL)"
 	@echo "  qwen-model          Download Qwen2.5-1.5B-Instruct Q8_0 GGUF into \$$(QWEN_DIR)"
-	@echo "  qwen-verify         Quick inference smoke-test with llama-cli"
+	@echo "  qwen-verify         Quick inference smoke-test with Qwen's llama-cli"
 	@echo "  qwen-clean          Remove \$$(QWEN_DIR)"
 	@echo ""
 	@echo "Benchmarks & analysis:"
@@ -249,23 +254,42 @@ smoke-test:
 
 # ── Qwen2.5 1.5B baseline ─────────────────────────────────────────────────────
 #
-# No separate C++ build is needed: llama-cli.exe is reused from the BitNet
-# build tree ($(LLAMA_CLI)).  Run 'make bitnet-build' first if it is absent.
+# Fully independent of BitNet: clones upstream ggml-org/llama.cpp and builds
+# it with standard MSVC (no ClangCL, no BitNet patches required).
 #
 # Q8_0 (1.89 GB) is the quantization closest to FP16 accuracy, chosen so
-# that accuracy comparisons against the published FP16 baselines are as
-# fair as possible without requiring a full F16 download (~3 GB).
+# that accuracy comparisons against published FP16 baselines are as fair as
+# possible without requiring a full F16 download (~3 GB).
+#
+# Tested on: Windows 11, Visual Studio 2022, MSVC 19.x, cmake 4.3.2
+# Tested commit: $(QWEN_LLAMACPP_COMMIT)
 #
 # Requirements:
-#   - hf  (huggingface_hub CLI)
-#   - BitNet already built  (provides llama-cli.exe at $(LLAMA_CLI))
+#   - git, cmake >= 3.22
+#   - Visual Studio 2022+ with Desktop development with C++ workload
+#   - hf  (huggingface_hub CLI, for qwen-model)
+
+qwen-setup: qwen-clone qwen-build qwen-model
+	@echo "Qwen build complete. Run 'make qwen-verify' to test inference."
+
+qwen-clone:
+	git clone $(QWEN_LLAMACPP_REPO) $(QWEN_LLAMACPP_DIR)
+	cd $(QWEN_LLAMACPP_DIR) && git checkout $(QWEN_LLAMACPP_COMMIT)
+
+# -DLLAMA_CURL=OFF  avoids an optional OpenSSL dependency not needed for inference.
+# -DGGML_NATIVE=ON  enables AVX2/FMA/F16C on the build machine for better throughput.
+qwen-build:
+	cd $(QWEN_LLAMACPP_DIR) && cmake -B build \
+		-DLLAMA_CURL=OFF \
+		-DGGML_NATIVE=ON
+	cd $(QWEN_LLAMACPP_DIR) && cmake --build build --config Release
 
 qwen-model:
 	hf download $(QWEN_REPO) $(QWEN_FILE) \
 		--local-dir $(QWEN_DIR)
 
 qwen-verify:
-	$(LLAMA_CLI) \
+	$(QWEN_CLI) \
 		-m $(QWEN_MODEL) \
 		-p "What is 2+2?" \
 		-n 32 \
