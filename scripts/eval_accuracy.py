@@ -127,8 +127,6 @@ def _query_completion(server: str, context: str, n_probs: int) -> list | None:
                 "n_probs": n_probs,
                 "temperature": 0.0,
             }, timeout=60)
-            probs_list = r.json().get("completion_probabilities", [])
-            return probs_list[0]["probs"] if probs_list else []
         except requests.exceptions.ConnectionError:
             if attempt < 2:
                 restarted = ensure_server(server)
@@ -137,6 +135,17 @@ def _query_completion(server: str, context: str, n_probs: int) -> list | None:
             return None
         except Exception:
             return None
+        try:
+            data = r.json()
+        except Exception:
+            return None
+        probs_list = data.get("completion_probabilities", [])
+        if not probs_list:
+            return []
+        item = probs_list[0]
+        # New llama.cpp: {"token": "...", "logprob": ..., "top_logprobs": [...]}
+        # Old llama.cpp: {"probs": [{"tok_str": "...", "prob": ...}]}
+        return item.get("top_logprobs") or item.get("probs", [])
     return None
 
 
@@ -144,19 +153,27 @@ def _best_prefix_match(top_tokens: list, target: str) -> tuple[float, str]:
     """
     Find the token in top_tokens whose decoded form is the longest prefix of
     target.  Returns (log_prob, matched_text) or (float('-inf'), '') if none match.
+
+    Handles both llama.cpp response formats:
+      Old: {"tok_str": "▁A", "prob": 0.8}   (prob is a probability, must log it)
+      New: {"token": " A",  "logprob": -0.2} (already a log-probability)
     """
     import math
-    best_prob = None
+    best_logprob = None
     best_len = 0
     best_decoded = ""
     for entry in top_tokens:
-        decoded = _decode_tok_str(entry["tok_str"])
+        raw = entry.get("tok_str") or entry.get("token", "")
+        decoded = _decode_tok_str(raw)
         if decoded and target.startswith(decoded) and len(decoded) > best_len:
-            best_prob = entry["prob"]
             best_len = len(decoded)
             best_decoded = decoded
-    if best_prob is not None:
-        return math.log(max(best_prob, 1e-10)), best_decoded
+            if "logprob" in entry:
+                best_logprob = entry["logprob"]
+            else:
+                best_logprob = math.log(max(entry.get("prob", 0.0), 1e-10))
+    if best_logprob is not None:
+        return best_logprob, best_decoded
     return float("-inf"), ""
 
 
@@ -220,7 +237,7 @@ def load_arc(subset: str, limit: int | None):
     return ds
 
 
-def eval_arc(ds, server: str) -> dict:
+def eval_arc(ds, server: str, verbose: bool = False) -> dict:
     letter_map = {"1": "A", "2": "B", "3": "C", "4": "D",
                   "A": "A", "B": "B", "C": "C", "D": "D", "E": "E"}
     correct = 0
@@ -236,7 +253,14 @@ def eval_arc(ds, server: str) -> dict:
         if all(s == float("-inf") for _, s in scores):
             skipped += 1
             continue
-        if max(scores, key=lambda x: x[1])[0] == answer_letter:
+        predicted = max(scores, key=lambda x: x[1])[0]
+        if verbose:
+            print(f"  Question: {row['question']}")
+            for l, t in zip(letters, choices_text):
+                print(f"    {l}. {t}")
+            print(f"  Expected: {answer_letter}  Predicted: {predicted}  "
+                  f"{'CORRECT' if predicted == answer_letter else 'WRONG'}")
+        if predicted == answer_letter:
             correct += 1
     n = len(ds) - skipped
     return {"accuracy": round(correct / n * 100, 2) if n else 0.0,
@@ -330,7 +354,7 @@ def load_hellaswag(limit: int | None):
     return ds
 
 
-def prefetch_all_datasets(tasks: list[str], limit: int | None):
+def prefetch_all_datasets(tasks: list[str], limit: int | None, max_subjects: int | None = None):
     """Download all required datasets to the HuggingFace cache before the server starts."""
     from datasets import load_dataset
     print("Pre-fetching datasets...", flush=True)
@@ -349,8 +373,9 @@ def prefetch_all_datasets(tasks: list[str], limit: int | None):
             load_hellaswag(limit)
             print("ok", flush=True)
         elif task == "mmlu":
-            print(f"  mmlu ({len(MMLU_SUBJECTS)} subjects)...", flush=True)
-            for subj in MMLU_SUBJECTS:
+            subjects = MMLU_SUBJECTS[:max_subjects] if max_subjects else MMLU_SUBJECTS
+            print(f"  mmlu ({len(subjects)} subjects)...", flush=True)
+            for subj in subjects:
                 print(f"    {subj}...", end=" ", flush=True)
                 try:
                     load_dataset("cais/mmlu", subj, split="test", trust_remote_code=False)
@@ -361,7 +386,7 @@ def prefetch_all_datasets(tasks: list[str], limit: int | None):
     print("Datasets ready.", flush=True)
 
 
-def eval_hellaswag(ds, server: str, out: Path | None = None) -> dict:
+def eval_hellaswag(ds, server: str, out: Path | None = None, verbose: bool = False) -> dict:
     """
     Continuation scoring with length normalization: score each ending as a
     completion of ctx, normalized by token count to remove length bias between
@@ -383,7 +408,17 @@ def eval_hellaswag(ds, server: str, out: Path | None = None) -> dict:
         if all(s == float("-inf") for s in scores):
             skipped += 1
         else:
-            if scores.index(max(scores)) == int(row["label"]):
+            label = int(row["label"])
+            pred_idx = scores.index(max(scores))
+            if verbose:
+                ctx_short = context[:120] + "..." if len(context) > 120 else context
+                print(f"  Context: {ctx_short}")
+                for i, e in enumerate(row["endings"]):
+                    marker = "  ← expected" if i == label else ""
+                    print(f"    {i}: {e}{marker}")
+                print(f"  Predicted: {pred_idx}  "
+                      f"{'CORRECT' if pred_idx == label else 'WRONG'}")
+            if pred_idx == label:
                 correct += 1
         n_processed += 1
         if out and n_processed % CHECKPOINT_INTERVAL == 0:
@@ -437,7 +472,8 @@ def make_mmlu_fewshot_prompt(dev_rows, subject_name: str) -> str:
     return header + "\n\n".join(shots) + "\n\n"
 
 
-def eval_mmlu_subject(subject: str, server: str, num_fewshot: int, limit: int | None) -> dict:
+def eval_mmlu_subject(subject: str, server: str, num_fewshot: int, limit: int | None,
+                      verbose: bool = False) -> dict:
     from datasets import load_dataset
     test_ds = load_dataset("cais/mmlu", subject, split="test", trust_remote_code=False)
     if limit:
@@ -459,7 +495,16 @@ def eval_mmlu_subject(subject: str, server: str, num_fewshot: int, limit: int | 
         if all(s == float("-inf") for s in scores):
             skipped += 1
             continue
-        if scores.index(max(scores)) == row["answer"]:
+        pred_idx = scores.index(max(scores))
+        if verbose:
+            print(f"  Question: {row['question']}")
+            for l, t in zip(ANSWER_CHOICES, opts):
+                print(f"    {l}. {t}")
+            expected = ANSWER_CHOICES[row["answer"]]
+            predicted = ANSWER_CHOICES[pred_idx]
+            print(f"  Expected: {expected}  Predicted: {predicted}  "
+                  f"{'CORRECT' if pred_idx == row['answer'] else 'WRONG'}")
+        if pred_idx == row["answer"]:
             correct += 1
     n = len(test_ds) - skipped
     return {"accuracy": round(correct / n * 100, 2) if n else 0.0,
@@ -488,7 +533,8 @@ def _checkpoint_mmlu(out: Path, subject_results: dict, all_correct: int, all_tot
 
 
 def eval_mmlu(server: str, num_fewshot: int, limit: int | None,
-              max_subjects: int | None = None, out: Path | None = None) -> dict:
+              max_subjects: int | None = None, out: Path | None = None,
+              verbose: bool = False) -> dict:
     all_correct = 0
     all_total = 0
     subject_results = {}
@@ -513,7 +559,7 @@ def eval_mmlu(server: str, num_fewshot: int, limit: int | None,
             print(f"  {subj:45s} {subject_results[subj]['accuracy']:5.1f}% (cached)", flush=True)
             continue
         try:
-            r = eval_mmlu_subject(subj, server, num_fewshot, limit)
+            r = eval_mmlu_subject(subj, server, num_fewshot, limit, verbose=verbose)
             subject_results[subj] = r
             all_correct += r["correct"]
             all_total += r["total"]
@@ -540,14 +586,15 @@ def check_server(server: str) -> bool:
 
 
 def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
-             max_subjects: int | None = None, out: Path | None = None) -> dict:
+             max_subjects: int | None = None, out: Path | None = None,
+             verbose: bool = False) -> dict:
     t0 = time.time()
     print(f"\n{'='*60}\nTask: {task}  limit={limit}  few-shot={num_fewshot}\n{'='*60}")
     if task in ("arc_easy", "arc_challenge"):
         subset = "ARC-Easy" if task == "arc_easy" else "ARC-Challenge"
         ds = load_arc(subset, limit)
         print(f"Loaded {len(ds)} samples")
-        result = eval_arc(ds, server)
+        result = eval_arc(ds, server, verbose=verbose)
     elif task == "winogrande":
         ds = load_winogrande(limit)
         print(f"Loaded {len(ds)} samples")
@@ -555,9 +602,10 @@ def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
     elif task == "hellaswag":
         ds = load_hellaswag(limit)
         print(f"Loaded {len(ds)} samples")
-        result = eval_hellaswag(ds, server, out=out)
+        result = eval_hellaswag(ds, server, out=out, verbose=verbose)
     elif task == "mmlu":
-        result = eval_mmlu(server, num_fewshot, limit, max_subjects=max_subjects, out=out)
+        result = eval_mmlu(server, num_fewshot, limit, max_subjects=max_subjects, out=out,
+                           verbose=verbose)
     else:
         raise ValueError(f"Unknown task: {task}")
     elapsed = time.time() - t0
@@ -581,6 +629,8 @@ def main():
                         help="Max MMLU subjects to evaluate (default: all 57)")
     parser.add_argument("--server", default="http://127.0.0.1:8080")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--verbose", action="store_true",
+                        help="Print prompt and expected/predicted answer for each sample")
     parser.add_argument("--start-server", action="store_true",
                         help="Start and manage llama-server automatically")
     parser.add_argument("--bitnet-dir", type=Path, default=DEFAULT_BITNET_DIR)
@@ -591,7 +641,7 @@ def main():
     port = int(args.server.split(":")[-1])
     tasks = TASKS if args.task == "all" else [args.task]
 
-    prefetch_all_datasets(tasks, args.limit)
+    prefetch_all_datasets(tasks, args.limit, max_subjects=args.max_subjects)
 
     if args.start_server:
         global _server_args
@@ -611,7 +661,7 @@ def main():
         fewshot = args.num_fewshot if task == "mmlu" else 0
         all_results[task] = run_task(task, args.server, fewshot, args.limit,
                                      max_subjects=args.max_subjects if task == "mmlu" else None,
-                                     out=args.out)
+                                     out=args.out, verbose=args.verbose)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     existing = {}

@@ -24,6 +24,7 @@ import csv
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _parser = argparse.ArgumentParser(description="Smoke test for inference models and Phase 4 scripts.")
@@ -45,11 +46,19 @@ QWEN_DIR   = ROOT.parent / "Models" / "Qwen"
 QWEN_MODEL = QWEN_DIR / "qwen2.5-1.5b-instruct-q8_0.gguf"
 QWEN_CLI   = QWEN_DIR / "llama.cpp" / "build" / "bin" / "Release" / "llama-cli.exe"
 
+BITNET_SERVER    = BITNET_DIR / "build" / "bin" / "Release" / "llama-server.exe"
+QWEN_SERVER      = QWEN_DIR / "llama.cpp" / "build" / "bin" / "Release" / "llama-server.exe"
+EVAL_PORT        = 8081
+EVAL_SERVER_URL  = f"http://127.0.0.1:{EVAL_PORT}"
+EVAL_SMOKE_OUT   = RESULTS / "smoke_accuracy.json"  # separate from main results; deleted each run
+
 HARDWARE_RATE     = 0.170   # AWS c5.xlarge on-demand $/hr
 N_TOKENS          = 16      # tokens to generate per test prompt (keep smoke test fast)
 THREADS           = 4
 CTX               = 512     # small context keeps KV cache tiny during smoke test
 INFERENCE_TIMEOUT = 120     # seconds per llama-cli invocation before reporting TIMEOUT
+EVAL_TIMEOUT      = 300     # seconds per eval task subprocess (dataset fetch + 1 sample)
+EVAL_LIMIT        = 5       # samples per task in the smoke run
 
 # (prompt, [acceptable keywords], test label)
 INFERENCE_CASES = [
@@ -59,6 +68,7 @@ INFERENCE_CASES = [
 ]
 
 _failures: list[str] = []
+_eval_server: subprocess.Popen | None = None
 
 
 def check(label: str, condition: bool, detail: str = "") -> None:
@@ -167,6 +177,38 @@ def smoke_model(name: str, cli: Path, model: Path,
     return tps_list
 
 
+def _start_eval_server(server_bin: Path, model: Path) -> bool:
+    global _eval_server
+    cmd = [
+        str(server_bin), "-m", str(model),
+        "-c", "512", "-t", str(THREADS), "-ub", "128", "-ngl", "0",
+        "--host", "127.0.0.1", "--port", str(EVAL_PORT), "-cb",
+    ]
+    _eval_server = subprocess.Popen(
+        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    for _ in range(40):
+        time.sleep(2)
+        try:
+            import requests as _req
+            if _req.get(f"{EVAL_SERVER_URL}/health", timeout=2).status_code == 200:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _stop_eval_server():
+    global _eval_server
+    if _eval_server is not None:
+        _eval_server.terminate()
+        try:
+            _eval_server.wait(timeout=5)
+        except Exception:
+            _eval_server.kill()
+        _eval_server = None
+
+
 # ── Inference smoke tests ─────────────────────────────────────────────────────
 
 print("\n" + "="*60)
@@ -258,6 +300,53 @@ print(f"{'='*60}")
 result = run_script(str(SCRIPTS / "eval_accuracy.py"), "--help")
 check("--help exits 0", result.returncode == 0, result.stderr.strip())
 check("--task flag present", "--task" in result.stdout)
+
+# ── eval_accuracy.py: accuracy smoke (1 sample per task) ─────────────────────
+
+print(f"\n{'='*60}")
+print("  eval_accuracy.py: accuracy smoke  (mmlu / arc_easy / hellaswag, 1 sample)")
+print(f"{'='*60}")
+
+_eval_configs = []
+for _run_flag, _name, _server_bin, _model_path in [
+    (RUN_BITNET, "BitNet b1.58 2B4T",           BITNET_SERVER, BITNET_MODEL),
+    (RUN_QWEN,   "Qwen2.5-1.5B-Instruct Q8_0",  QWEN_SERVER,   QWEN_MODEL),
+]:
+    if not _run_flag:
+        continue
+    if not _server_bin.exists():
+        print(f"  SKIP {_name}  (llama-server not found: {_server_bin})")
+        _failures.append(f"eval accuracy smoke {_name}: llama-server not found")
+    elif not _model_path.exists():
+        print(f"  SKIP {_name}  (model not found: {_model_path})")
+        _failures.append(f"eval accuracy smoke {_name}: model not found")
+    else:
+        _eval_configs.append((_name, _server_bin, _model_path))
+
+for _name, _server_bin, _model_path in _eval_configs:
+    print(f"\n  {_name}")
+    print("  Starting llama-server...", end=" ", flush=True)
+    if not _start_eval_server(_server_bin, _model_path):
+        check(f"{_name}: llama-server started", False, "timed out after ~80s")
+        continue
+    print("ready.")
+    EVAL_SMOKE_OUT.unlink(missing_ok=True)  # always start fresh; no stale checkpoint
+    for task in ("mmlu", "arc_easy", "arc_challenge", "hellaswag"):
+        print(f"\n    [{task}]", flush=True)
+        extra = ["--max-subjects", "1"] if task == "mmlu" else []
+        try:
+            r = subprocess.run(
+                [sys.executable, str(SCRIPTS / "eval_accuracy.py"),
+                 "--task", task, "--limit", str(EVAL_LIMIT),
+                 "--out", str(EVAL_SMOKE_OUT),
+                 "--server", EVAL_SERVER_URL, "--verbose", *extra],
+                stderr=subprocess.PIPE, text=True, cwd=ROOT,
+                timeout=EVAL_TIMEOUT,
+            )
+            check(f"{_name} {task}: exits 0", r.returncode == 0, r.stderr.strip()[:200])
+        except subprocess.TimeoutExpired:
+            check(f"{_name} {task}: completed within {EVAL_TIMEOUT}s", False, "TIMEOUT")
+    _stop_eval_server()
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
