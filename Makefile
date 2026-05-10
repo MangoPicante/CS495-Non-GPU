@@ -32,7 +32,7 @@ QWEN_SERVER        ?= $(QWEN_LLAMACPP_DIR)/build/bin/Release/llama-server.exe
         bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
         qwen-setup qwen-clone qwen-build qwen-model qwen-verify qwen-clean \
-        benchmark plots smoke-test \
+        benchmark plots smoke-test smoke-test-bitnet smoke-test-qwen \
         eval-winogrande eval-hellaswag \
         clean nuke
 
@@ -71,7 +71,9 @@ help:
 	@echo "  eval-winogrande     Run WinoGrande eval with continuation scoring (LIMIT=$(LIMIT))"
 	@echo "  eval-hellaswag      Run HellaSwag eval with continuation scoring (LIMIT=$(LIMIT))"
 	@echo "  plots               Generate plots + comparison_table.csv from benchmark and accuracy results"
-	@echo "  smoke-test          Verify scripts produce expected outputs"
+	@echo "  smoke-test          Verify scripts produce expected outputs (both models)"
+	@echo "  smoke-test-bitnet   Verify BitNet inference only"
+	@echo "  smoke-test-qwen     Verify Qwen inference only"
 	@echo ""
 	@echo "Housekeeping:"
 	@echo "  clean               Remove results/plots/ and cached .pyc files"
@@ -251,6 +253,12 @@ plots:
 
 smoke-test:
 	$(POETRY) run python scripts/smoke_test.py
+
+smoke-test-bitnet:
+	$(POETRY) run python scripts/smoke_test.py bitnet
+
+smoke-test-qwen:
+	$(POETRY) run python scripts/smoke_test.py qwen
 
 # ── Qwen2.5 1.5B baseline ─────────────────────────────────────────────────────
 #
