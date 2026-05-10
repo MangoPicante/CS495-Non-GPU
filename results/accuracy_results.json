@@ -1,97 +1,49 @@
 {
   "arc_easy": {
-    "accuracy": 85.68,
-    "correct": 2028,
-    "total": 2367,
-    "skipped": 9,
-    "elapsed_s": 34897.9,
+    "accuracy": 85.65,
+    "correct": 2035,
+    "total": 2376,
+    "skipped": 0,
+    "elapsed_s": 4554.5,
     "paper_target": 74.79
   },
   "arc_challenge": {
-    "accuracy": 70.4,
-    "correct": 352,
-    "total": 500,
+    "accuracy": 68.86,
+    "correct": 807,
+    "total": 1172,
     "skipped": 0,
-    "elapsed_s": 1363.8,
+    "elapsed_s": 2477.3,
     "paper_target": 49.91
   },
-  "winogrande": {
-    "accuracy": 52.8,
-    "correct": 264,
-    "total": 500,
-    "skipped": 0,
-    "elapsed_s": 407.6,
-    "paper_target": 71.9
-  },
-  "hellaswag": {
-    "accuracy": 51.2,
-    "correct": 256,
-    "total": 500,
-    "skipped": 0,
-    "elapsed_s": 1954.2,
-    "paper_target": 68.44
-  },
   "mmlu": {
-    "accuracy": 45.56,
-    "correct": 82,
-    "total": 180,
+    "accuracy": 47.23,
+    "correct": 230,
+    "total": 487,
     "subjects": {
       "abstract_algebra": {
-        "accuracy": 45.0,
-        "correct": 9,
-        "total": 20,
+        "accuracy": 34.0,
+        "correct": 34,
+        "total": 100,
         "skipped": 0
       },
       "anatomy": {
-        "accuracy": 40.0,
-        "correct": 8,
-        "total": 20,
+        "accuracy": 42.96,
+        "correct": 58,
+        "total": 135,
         "skipped": 0
       },
       "astronomy": {
-        "accuracy": 55.0,
-        "correct": 11,
-        "total": 20,
+        "accuracy": 57.24,
+        "correct": 87,
+        "total": 152,
         "skipped": 0
       },
       "business_ethics": {
-        "accuracy": 65.0,
-        "correct": 13,
-        "total": 20,
-        "skipped": 0
-      },
-      "clinical_knowledge": {
-        "accuracy": 50.0,
-        "correct": 10,
-        "total": 20,
-        "skipped": 0
-      },
-      "college_chemistry": {
-        "accuracy": 35.0,
-        "correct": 7,
-        "total": 20,
-        "skipped": 0
-      },
-      "college_computer_science": {
-        "accuracy": 25.0,
-        "correct": 5,
-        "total": 20,
-        "skipped": 0
-      },
-      "college_mathematics": {
-        "accuracy": 30.0,
-        "correct": 6,
-        "total": 20,
-        "skipped": 0
-      },
-      "college_medicine": {
-        "accuracy": 65.0,
-        "correct": 13,
-        "total": 20,
+        "accuracy": 51.0,
+        "correct": 51,
+        "total": 100,
         "skipped": 0
       }
-    },
-    "elapsed_s": 529.4,
-    "paper_target": 53.17
+    }
   }
 }
