@@ -282,6 +282,37 @@ def load_hellaswag(limit: int | None):
     return ds
 
 
+def prefetch_all_datasets(tasks: list[str], limit: int | None):
+    """Download all required datasets to the HuggingFace cache before the server starts."""
+    from datasets import load_dataset
+    print("Pre-fetching datasets...", flush=True)
+    for task in tasks:
+        if task in ("arc_easy", "arc_challenge"):
+            subset = "ARC-Easy" if task == "arc_easy" else "ARC-Challenge"
+            print(f"  ai2_arc/{subset}...", end=" ", flush=True)
+            load_arc(subset, limit)
+            print("ok", flush=True)
+        elif task == "winogrande":
+            print(f"  winogrande_xl (validation)...", end=" ", flush=True)
+            load_winogrande(limit)
+            print("ok", flush=True)
+        elif task == "hellaswag":
+            print(f"  hellaswag (validation)...", end=" ", flush=True)
+            load_hellaswag(limit)
+            print("ok", flush=True)
+        elif task == "mmlu":
+            print(f"  mmlu ({len(MMLU_SUBJECTS)} subjects)...", flush=True)
+            for subj in MMLU_SUBJECTS:
+                print(f"    {subj}...", end=" ", flush=True)
+                try:
+                    load_dataset("cais/mmlu", subj, split="test", trust_remote_code=False)
+                    load_dataset("cais/mmlu", subj, split="dev", trust_remote_code=False)
+                    print("ok", flush=True)
+                except Exception as e:
+                    print(f"ERROR: {e}", flush=True)
+    print("Datasets ready.", flush=True)
+
+
 def eval_hellaswag(ds, server: str) -> dict:
     """
     Continuation scoring with length normalization: score each ending as a
@@ -371,20 +402,63 @@ def eval_mmlu_subject(subject: str, server: str, num_fewshot: int, limit: int | 
             "correct": correct, "total": n, "skipped": skipped}
 
 
-def eval_mmlu(server: str, num_fewshot: int, limit: int | None, max_subjects: int | None = None) -> dict:
+def _checkpoint_mmlu(out: Path, subject_results: dict, all_correct: int, all_total: int):
+    """Write partial MMLU results to the output file after each subject completes."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    existing = {}
+    if out.exists():
+        try:
+            with open(out) as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+    overall = (all_correct / all_total * 100) if all_total else 0.0
+    existing["mmlu"] = {
+        "accuracy": round(overall, 2),
+        "correct": all_correct,
+        "total": all_total,
+        "subjects": subject_results,
+    }
+    with open(out, "w") as f:
+        json.dump(existing, f, indent=2)
+
+
+def eval_mmlu(server: str, num_fewshot: int, limit: int | None,
+              max_subjects: int | None = None, out: Path | None = None) -> dict:
     all_correct = 0
     all_total = 0
     subject_results = {}
+
+    # Resume from checkpoint if output file already has partial MMLU results
+    if out and out.exists():
+        try:
+            with open(out) as f:
+                prev = json.load(f).get("mmlu", {}).get("subjects", {})
+            for subj, r in prev.items():
+                subject_results[subj] = r
+                all_correct += r["correct"]
+                all_total += r["total"]
+            if subject_results:
+                print(f"  Resuming: {len(subject_results)} subjects already in checkpoint.", flush=True)
+        except Exception:
+            pass
+
     subjects = MMLU_SUBJECTS[:max_subjects] if max_subjects else MMLU_SUBJECTS
     for subj in subjects:
+        if subj in subject_results:
+            print(f"  {subj:45s} {subject_results[subj]['accuracy']:5.1f}% (cached)", flush=True)
+            continue
         try:
             r = eval_mmlu_subject(subj, server, num_fewshot, limit)
             subject_results[subj] = r
             all_correct += r["correct"]
             all_total += r["total"]
             print(f"  {subj:45s} {r['accuracy']:5.1f}% ({r['correct']}/{r['total']})", flush=True)
+            if out:
+                _checkpoint_mmlu(out, subject_results, all_correct, all_total)
         except Exception as e:
             print(f"  {subj:45s} ERROR: {e}", flush=True)
+
     overall = (all_correct / all_total * 100) if all_total else 0.0
     return {"accuracy": round(overall, 2), "correct": all_correct, "total": all_total,
             "subjects": subject_results}
@@ -402,7 +476,7 @@ def check_server(server: str) -> bool:
 
 
 def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
-             max_subjects: int | None = None) -> dict:
+             max_subjects: int | None = None, out: Path | None = None) -> dict:
     t0 = time.time()
     print(f"\n{'='*60}\nTask: {task}  limit={limit}  few-shot={num_fewshot}\n{'='*60}")
     if task in ("arc_easy", "arc_challenge"):
@@ -419,7 +493,7 @@ def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
         print(f"Loaded {len(ds)} samples")
         result = eval_hellaswag(ds, server)
     elif task == "mmlu":
-        result = eval_mmlu(server, num_fewshot, limit, max_subjects=max_subjects)
+        result = eval_mmlu(server, num_fewshot, limit, max_subjects=max_subjects, out=out)
     else:
         raise ValueError(f"Unknown task: {task}")
     elapsed = time.time() - t0
@@ -451,6 +525,9 @@ def main():
     args = parser.parse_args()
 
     port = int(args.server.split(":")[-1])
+    tasks = TASKS if args.task == "all" else [args.task]
+
+    prefetch_all_datasets(tasks, args.limit)
 
     if args.start_server:
         global _server_args
@@ -465,12 +542,12 @@ def main():
         print(f"ERROR: No server at {args.server}. Pass --start-server or start it manually.")
         return
 
-    tasks = TASKS if args.task == "all" else [args.task]
     all_results = {}
     for task in tasks:
         fewshot = args.num_fewshot if task == "mmlu" else 0
         all_results[task] = run_task(task, args.server, fewshot, args.limit,
-                                     max_subjects=args.max_subjects if task == "mmlu" else None)
+                                     max_subjects=args.max_subjects if task == "mmlu" else None,
+                                     out=args.out)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     existing = {}
