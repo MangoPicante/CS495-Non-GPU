@@ -251,7 +251,39 @@ def load_winogrande(limit: int | None):
     return ds
 
 
-def eval_winogrande(ds, server: str) -> dict:
+CHECKPOINT_INTERVAL = 100  # save after every N samples for long-running tasks
+
+
+def _checkpoint_task(out: Path, task: str, data: dict):
+    """Persist partial task results so a crash only loses at most CHECKPOINT_INTERVAL samples."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    existing = {}
+    if out.exists():
+        try:
+            with open(out) as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+    existing[task] = data
+    with open(out, "w") as f:
+        json.dump(existing, f, indent=2)
+
+
+def _load_task_checkpoint(out: Path | None, task: str) -> dict:
+    """Return partial checkpoint for task if one exists (has n_processed field), else {}."""
+    if not out or not out.exists():
+        return {}
+    try:
+        with open(out) as f:
+            ckpt = json.load(f).get(task, {})
+        if "n_processed" in ckpt:
+            return ckpt
+    except Exception:
+        pass
+    return {}
+
+
+def eval_winogrande(ds, server: str, out: Path | None = None) -> dict:
     """
     Continuation scoring: score each option as a direct completion of the sentence
     prefix (text before the blank).  Strip the trailing space from the prefix and
@@ -259,16 +291,32 @@ def eval_winogrande(ds, server: str) -> dict:
     """
     correct = 0
     skipped = 0
-    for row in ds:
+    n_processed = 0
+
+    ckpt = _load_task_checkpoint(out, "winogrande")
+    if ckpt:
+        correct, skipped, n_processed = ckpt["correct"], ckpt["skipped"], ckpt["n_processed"]
+        print(f"  Resuming winogrande: {n_processed}/{len(ds)} samples done.", flush=True)
+
+    for row in ds.select(range(n_processed, len(ds))):
         prefix = row["sentence"].split("_")[0].rstrip()
         s1 = continuation_logprob(server, prefix, " " + row["option1"])
         s2 = continuation_logprob(server, prefix, " " + row["option2"])
         if s1 == float("-inf") and s2 == float("-inf"):
             skipped += 1
-            continue
-        pred = "1" if s1 >= s2 else "2"
-        if pred == row["answer"]:
-            correct += 1
+        else:
+            pred = "1" if s1 >= s2 else "2"
+            if pred == row["answer"]:
+                correct += 1
+        n_processed += 1
+        if out and n_processed % CHECKPOINT_INTERVAL == 0:
+            n = n_processed - skipped
+            _checkpoint_task(out, "winogrande", {
+                "accuracy": round(correct / n * 100, 2) if n else 0.0,
+                "correct": correct, "total": n, "skipped": skipped,
+                "n_processed": n_processed,
+            })
+
     n = len(ds) - skipped
     return {"accuracy": round(correct / n * 100, 2) if n else 0.0,
             "correct": correct, "total": n, "skipped": skipped}
@@ -313,7 +361,7 @@ def prefetch_all_datasets(tasks: list[str], limit: int | None):
     print("Datasets ready.", flush=True)
 
 
-def eval_hellaswag(ds, server: str) -> dict:
+def eval_hellaswag(ds, server: str, out: Path | None = None) -> dict:
     """
     Continuation scoring with length normalization: score each ending as a
     completion of ctx, normalized by token count to remove length bias between
@@ -321,15 +369,31 @@ def eval_hellaswag(ds, server: str) -> dict:
     """
     correct = 0
     skipped = 0
-    for row in ds:
+    n_processed = 0
+
+    ckpt = _load_task_checkpoint(out, "hellaswag")
+    if ckpt:
+        correct, skipped, n_processed = ckpt["correct"], ckpt["skipped"], ckpt["n_processed"]
+        print(f"  Resuming hellaswag: {n_processed}/{len(ds)} samples done.", flush=True)
+
+    for row in ds.select(range(n_processed, len(ds))):
         context = row["ctx"]
         scores = [continuation_logprob(server, context, " " + e, normalize=True)
                   for e in row["endings"]]
         if all(s == float("-inf") for s in scores):
             skipped += 1
-            continue
-        if scores.index(max(scores)) == int(row["label"]):
-            correct += 1
+        else:
+            if scores.index(max(scores)) == int(row["label"]):
+                correct += 1
+        n_processed += 1
+        if out and n_processed % CHECKPOINT_INTERVAL == 0:
+            n = n_processed - skipped
+            _checkpoint_task(out, "hellaswag", {
+                "accuracy": round(correct / n * 100, 2) if n else 0.0,
+                "correct": correct, "total": n, "skipped": skipped,
+                "n_processed": n_processed,
+            })
+
     n = len(ds) - skipped
     return {"accuracy": round(correct / n * 100, 2) if n else 0.0,
             "correct": correct, "total": n, "skipped": skipped}
@@ -487,11 +551,11 @@ def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
     elif task == "winogrande":
         ds = load_winogrande(limit)
         print(f"Loaded {len(ds)} samples")
-        result = eval_winogrande(ds, server)
+        result = eval_winogrande(ds, server, out=out)
     elif task == "hellaswag":
         ds = load_hellaswag(limit)
         print(f"Loaded {len(ds)} samples")
-        result = eval_hellaswag(ds, server)
+        result = eval_hellaswag(ds, server, out=out)
     elif task == "mmlu":
         result = eval_mmlu(server, num_fewshot, limit, max_subjects=max_subjects, out=out)
     else:
