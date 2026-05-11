@@ -32,6 +32,9 @@ build/
 # codecarbon output
 emissions.csv
 
+# Smoke test scratch output (regenerated on every run)
+results/smoke_accuracy.json
+
 # IDE
 .vscode/
 .idea/
