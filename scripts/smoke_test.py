@@ -267,7 +267,7 @@ check("comparison_table.csv exists", csv_path.exists())
 if csv_path.exists():
     with csv_path.open(newline="") as f:
         rows = list(csv.DictReader(f))
-    check("7 data rows (5 FP16 + paper + ours)", len(rows) == 7, f"got {len(rows)}")
+    check("≥7 data rows (5 FP16 + paper + ours [+ Qwen ours])", len(rows) >= 7, f"got {len(rows)}")
     required_cols = {
         "model", "source", "throughput_tokens_s", "peak_rss_mb",
         "cost_per_1k_tokens", "arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu",

@@ -31,6 +31,8 @@ PLOTS_DIR = Path(__file__).parent.parent / "results" / "plots"
 DEFAULT_CSV = Path(__file__).parent.parent / "results" / "step_metrics.csv"
 DEFAULT_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results.json"
 DEFAULT_COMPARISON_CSV = Path(__file__).parent.parent / "results" / "comparison_table.csv"
+DEFAULT_QWEN_CSV = Path(__file__).parent.parent / "results" / "qwen_metrics.csv"
+DEFAULT_QWEN_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "qwen_accuracy_results.json"
 
 # AWS c5.xlarge on-demand, us-east-1 (4 vCPUs — matches 4-thread benchmark condition)
 # Source: https://instances.vantage.sh/aws/ec2/c5.xlarge (retrieved 2026-05-08)
@@ -78,6 +80,8 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--results", default=str(DEFAULT_CSV))
     p.add_argument("--accuracy", default=str(DEFAULT_ACCURACY_JSON))
+    p.add_argument("--qwen-results", default=str(DEFAULT_QWEN_CSV))
+    p.add_argument("--qwen-accuracy", default=str(DEFAULT_QWEN_ACCURACY_JSON))
     p.add_argument("--csv", default=str(DEFAULT_COMPARISON_CSV))
     p.add_argument(
         "--hardware-rate",
@@ -114,9 +118,27 @@ def load_accuracy(json_path: Path) -> dict:
     }
 
 
+def load_qwen(csv_path: Path) -> pd.DataFrame | None:
+    if not csv_path.exists():
+        return None
+    df = pd.read_csv(csv_path)
+    df = df[df["throughput_tokens_s"].notna() & (df["throughput_tokens_s"] != "")]
+    df["throughput_tokens_s"] = pd.to_numeric(df["throughput_tokens_s"])
+    df["peak_rss_mb"] = pd.to_numeric(df["peak_rss_mb"])
+    return df
+
+
 def _bitnet_row(local_df: pd.DataFrame) -> tuple[float | None, float | None]:
     """Return (median throughput, median peak_rss) for the n_prompt=512, n_gen=128 condition."""
     row = local_df[(local_df["n_prompt"] == 512) & (local_df["n_gen"] == 128)]
+    tps = row["throughput_tokens_s"].median() if not row.empty else None
+    rss = row["peak_rss_mb"].median() if not row.empty else None
+    return tps, rss
+
+
+def _qwen_row(qwen_df: pd.DataFrame) -> tuple[float | None, float | None]:
+    """Return (median throughput, median peak_rss) for Qwen at n_prompt=512, n_gen=128."""
+    row = qwen_df[(qwen_df["n_prompt"] == 512) & (qwen_df["n_gen"] == 128)]
     tps = row["throughput_tokens_s"].median() if not row.empty else None
     rss = row["peak_rss_mb"].median() if not row.empty else None
     return tps, rss
@@ -131,6 +153,8 @@ def build_comparison_df(
     local_df: pd.DataFrame,
     local_acc: dict,
     hardware_rate: float,
+    qwen_df: pd.DataFrame | None = None,
+    qwen_acc: dict | None = None,
 ) -> pd.DataFrame:
     ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
     rows = []
@@ -165,6 +189,19 @@ def build_comparison_df(
         **{f: (round(local_acc[f], 2) if local_acc.get(f) is not None else "") for f in ACC_FIELDS},
     })
 
+    if qwen_df is not None:
+        q_tps, q_rss = _qwen_row(qwen_df)
+        q_acc = qwen_acc or {}
+        q_cost = round(cost_per_1k(q_tps, hardware_rate), 6) if q_tps else ""
+        rows.append({
+            "model": "Qwen2.5-1.5B-Instruct Q8_0",
+            "source": "ours",
+            "throughput_tokens_s": round(q_tps, 2) if q_tps is not None else "",
+            "peak_rss_mb": round(q_rss, 0) if q_rss is not None else "",
+            "cost_per_1k_tokens": q_cost,
+            **{f: (round(q_acc[f], 2) if q_acc.get(f) is not None else "") for f in ACC_FIELDS},
+        })
+
     return pd.DataFrame(rows)
 
 
@@ -174,20 +211,49 @@ def write_comparison_csv(df: pd.DataFrame, out_path: Path) -> None:
     print(f"Saved {out_path}")
 
 
-def plot_throughput(local_df: pd.DataFrame, out_dir: Path):
+def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | None = None):
+    from matplotlib.patches import Patch
+
     bitnet_tps, _ = _bitnet_row(local_df)
 
-    models = list(FP16_BASELINES.keys()) + ["BitNet b1.58 2B4T"]
-    values = [FP16_BASELINES[m]["throughput_tokens_s"] for m in FP16_BASELINES]
-    values.append(bitnet_tps if bitnet_tps else 0)
-    colors = ["#4C72B0"] * len(FP16_BASELINES) + ["#DD8452"]
+    models = (
+        list(FP16_BASELINES.keys())
+        + ["BitNet b1.58 2B4T (paper)", "BitNet b1.58 2B4T (ours)"]
+    )
+    values = (
+        [FP16_BASELINES[m]["throughput_tokens_s"] for m in FP16_BASELINES]
+        + [BITNET_PAPER["throughput_tokens_s"], bitnet_tps if bitnet_tps else 0]
+    )
+    colors  = ["#4C72B0"] * len(FP16_BASELINES) + ["#DD8452", "#DD8452"]
+    hatches = [""]        * len(FP16_BASELINES) + ["///",     ""]
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    bars = ax.barh(models, values, color=colors)
-    ax.bar_label(bars, fmt="%.1f", padding=4)
+    if qwen_df is not None:
+        q_tps, _ = _qwen_row(qwen_df)
+        models.append("Qwen2.5-1.5B-Instruct Q8_0 (ours)")
+        values.append(q_tps if q_tps else 0)
+        colors.append("#55A868")
+        hatches.append("")
+
+    fig, ax = plt.subplots(figsize=(10, max(5, len(models) * 0.55)))
+    max_val = max(v for v in values if v) or 1
+    for i, (val, color, hatch) in enumerate(zip(values, colors, hatches)):
+        ax.barh(i, val, color=color, hatch=hatch,
+                edgecolor="#444444" if hatch else "#cccccc", linewidth=0.5)
+        ax.text(val + max_val * 0.01, i, f"{val:.1f}", va="center", fontsize=9)
+    ax.set_yticks(range(len(models)))
+    ax.set_yticklabels(models)
     ax.set_xlabel("Throughput (tokens/s)")
     ax.set_title("Inference Throughput: BitNet b1.58 2B4T vs FP16 Baselines\n(n_prompt=512, n_gen=128, CPU)")
+    ax.set_xlim(0, max_val * 1.15)
     ax.invert_yaxis()
+    legend_handles = [
+        Patch(facecolor="#4C72B0", edgecolor="#cccccc", label="FP16 baseline (paper)"),
+        Patch(facecolor="#DD8452", hatch="///", edgecolor="#444444", label="BitNet b1.58 2B4T (paper)"),
+        Patch(facecolor="#DD8452", edgecolor="#cccccc", label="BitNet b1.58 2B4T (ours)"),
+    ]
+    if qwen_df is not None:
+        legend_handles.append(Patch(facecolor="#55A868", edgecolor="#cccccc", label="Qwen2.5-1.5B Q8_0 (ours)"))
+    ax.legend(handles=legend_handles, loc="lower right", fontsize=8)
     fig.tight_layout()
     path = out_dir / "throughput_comparison.png"
     fig.savefig(path, dpi=150)
@@ -195,20 +261,49 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path):
     print(f"Saved {path}")
 
 
-def plot_memory(local_df: pd.DataFrame, out_dir: Path):
+def plot_memory(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | None = None):
+    from matplotlib.patches import Patch
+
     _, bitnet_rss = _bitnet_row(local_df)
 
-    models = list(FP16_BASELINES.keys()) + ["BitNet b1.58 2B4T"]
-    values = [FP16_BASELINES[m]["peak_rss_mb"] for m in FP16_BASELINES]
-    values.append(bitnet_rss if bitnet_rss else 0)
-    colors = ["#4C72B0"] * len(FP16_BASELINES) + ["#DD8452"]
+    models = (
+        list(FP16_BASELINES.keys())
+        + ["BitNet b1.58 2B4T (paper)", "BitNet b1.58 2B4T (ours)"]
+    )
+    values = (
+        [FP16_BASELINES[m]["peak_rss_mb"] for m in FP16_BASELINES]
+        + [BITNET_PAPER["peak_rss_mb"], bitnet_rss if bitnet_rss else 0]
+    )
+    colors  = ["#4C72B0"] * len(FP16_BASELINES) + ["#DD8452", "#DD8452"]
+    hatches = [""]        * len(FP16_BASELINES) + ["///",     ""]
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    bars = ax.barh(models, values, color=colors)
-    ax.bar_label(bars, fmt="%.0f MB", padding=4)
+    if qwen_df is not None:
+        _, q_rss = _qwen_row(qwen_df)
+        models.append("Qwen2.5-1.5B-Instruct Q8_0 (ours)")
+        values.append(q_rss if q_rss else 0)
+        colors.append("#55A868")
+        hatches.append("")
+
+    fig, ax = plt.subplots(figsize=(10, max(5, len(models) * 0.55)))
+    max_val = max(v for v in values if v) or 1
+    for i, (val, color, hatch) in enumerate(zip(values, colors, hatches)):
+        ax.barh(i, val, color=color, hatch=hatch,
+                edgecolor="#444444" if hatch else "#cccccc", linewidth=0.5)
+        ax.text(val + max_val * 0.01, i, f"{val:.0f} MB", va="center", fontsize=9)
+    ax.set_yticks(range(len(models)))
+    ax.set_yticklabels(models)
     ax.set_xlabel("Peak RSS (MB)")
     ax.set_title("Peak Memory: BitNet b1.58 2B4T vs FP16 Baselines\n(n_prompt=512, n_gen=128, CPU)")
+    ax.set_xlim(0, max_val * 1.18)
     ax.invert_yaxis()
+    legend_handles = [
+        Patch(facecolor="#4C72B0", edgecolor="#cccccc", label="FP16 baseline (paper)"),
+        Patch(facecolor="#DD8452", hatch="///", edgecolor="#444444", label="BitNet b1.58 2B4T (paper)"),
+        Patch(facecolor="#DD8452", edgecolor="#cccccc", label="BitNet b1.58 2B4T (ours)"),
+    ]
+    if qwen_df is not None:
+        legend_handles.append(Patch(facecolor="#55A868", edgecolor="#cccccc", label="Qwen2.5-1.5B Q8_0 (ours)"))
+    ax.legend(handles=legend_handles, loc="lower right", fontsize=8)
     fig.tight_layout()
     path = out_dir / "memory_comparison.png"
     fig.savefig(path, dpi=150)
@@ -218,7 +313,7 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path):
 
 def plot_throughput_by_config(local_df: pd.DataFrame, out_dir: Path):
     configs = local_df.groupby(["n_prompt", "n_gen"])["throughput_tokens_s"].median().reset_index()
-    labels = [f"p{row.n_prompt}/g{row.n_gen}" for _, row in configs.iterrows()]
+    labels = [f"p={int(row.n_prompt)} / g={int(row.n_gen)}" for _, row in configs.iterrows()]
 
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.bar(labels, configs["throughput_tokens_s"], color="#DD8452")
@@ -231,7 +326,7 @@ def plot_throughput_by_config(local_df: pd.DataFrame, out_dir: Path):
     print(f"Saved {path}")
 
 
-def plot_accuracy(local_acc: dict, out_dir: Path):
+def plot_accuracy(local_acc: dict, out_dir: Path, qwen_acc: dict | None = None):
     # WinoGrande/HellaSwag omitted: our letter-scoring method is methodology-
     # incompatible with the paper's continuation scoring, giving near-random results.
     tasks = ["arc_easy", "arc_challenge", "mmlu"]
@@ -240,20 +335,22 @@ def plot_accuracy(local_acc: dict, out_dir: Path):
 
     fp16_models = list(FP16_BASELINES.keys())
     all_models = fp16_models + ["BitNet 2B4T\n(paper)", "BitNet 2B4T\n(ours)"]
+    if qwen_acc is not None:
+        all_models.append("Qwen2.5-1.5B\nQ8_0 (ours)")
 
     paper_vals = [BITNET_PAPER[t] for t in tasks]
     our_vals = [local_acc.get(t) or 0 for t in tasks]
 
     x = np.arange(len(all_models))
-    width = 0.25
-    offsets = np.array([-width, 0, width])
+    n_tasks = len(tasks)
+    width = 0.22
+    offsets = np.linspace(-(n_tasks - 1) * width / 2, (n_tasks - 1) * width / 2, n_tasks)
 
-    fig, ax = plt.subplots(figsize=(14, 6))
+    fig, ax = plt.subplots(figsize=(max(14, len(all_models) * 1.6), 6))
     for i, (task, label, color) in enumerate(zip(tasks, task_labels, task_colors)):
-        vals = (
-            [FP16_BASELINES[m][task] for m in fp16_models]
-            + [paper_vals[i], our_vals[i]]
-        )
+        vals = [FP16_BASELINES[m][task] for m in fp16_models] + [paper_vals[i], our_vals[i]]
+        if qwen_acc is not None:
+            vals.append(qwen_acc.get(task) or 0)
         ax.bar(x + offsets[i], vals, width, label=label, color=color)
 
     ax.set_xticks(x)
@@ -283,39 +380,43 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    styles = {
-        "paper (FP16)": {"color": "#4C72B0", "marker": "o", "s": 100, "label": "FP16 baselines (paper)"},
-        "paper":        {"color": "#DD8452", "marker": "o", "s": 100, "label": "BitNet b1.58 2B4T (paper)"},
-        "ours":         {"color": "#DD8452", "marker": "D", "s": 100, "label": "BitNet b1.58 2B4T (ours, 0-shot MMLU)"},
-    }
+    QWEN_MODEL_NAME = "Qwen2.5-1.5B-Instruct Q8_0"
 
-    for source, style in styles.items():
-        subset = plot_df[plot_df["source"] == source]
-        if subset.empty:
-            continue
+    for _, row in plot_df.iterrows():
+        source = row["source"]
+        model = row["model"]
+        is_qwen_ours = source == "ours" and model == QWEN_MODEL_NAME
+        if source == "paper (FP16)":
+            color, marker, label = "#4C72B0", "o", None
+        elif source == "paper":
+            color, marker, label = "#DD8452", "o", "BitNet b1.58 2B4T (paper)"
+        elif is_qwen_ours:
+            color, marker, label = "#55A868", "D", "Qwen2.5-1.5B Q8_0 (ours, 0-shot MMLU)"
+        else:
+            color, marker, label = "#DD8452", "D", "BitNet b1.58 2B4T (ours, 0-shot MMLU)"
+
         ax.scatter(
-            subset["cost_per_1k_tokens"],
-            subset["mmlu"],
-            color=style["color"],
-            marker=style["marker"],
-            s=style["s"],
-            label=style["label"],
-            zorder=3,
+            row["cost_per_1k_tokens"], row["mmlu"],
+            color=color, marker=marker, s=100, label=label, zorder=3,
         )
-        for _, row in subset.iterrows():
-            label = row["model"].replace(" b1.58 2B4T", "").replace(" (FP16)", "")
-            ax.annotate(
-                label,
-                (row["cost_per_1k_tokens"], row["mmlu"]),
-                textcoords="offset points",
-                xytext=(6, 4),
-                fontsize=8,
-            )
+        ann_label = model.replace(" b1.58 2B4T", "").replace(" (FP16)", "").replace(" Q8_0", "")
+        ax.annotate(
+            ann_label,
+            (row["cost_per_1k_tokens"], row["mmlu"]),
+            textcoords="offset points", xytext=(6, 4), fontsize=8,
+        )
+
+    # De-duplicate legend entries
+    handles, labels_list = ax.get_legend_handles_labels()
+    seen: dict = {}
+    for h, l in zip(handles, labels_list):
+        if l and l not in seen:
+            seen[l] = h
+    ax.legend(seen.values(), seen.keys(), fontsize=9)
 
     ax.set_xlabel(f"Cost per 1,000 tokens (USD, c5.xlarge @ ${hardware_rate:.3f}/hr)")
     ax.set_ylabel("MMLU Accuracy (%)")
     ax.set_title("Cost–Accuracy Trade-off: BitNet b1.58 2B4T vs FP16 Baselines")
-    ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     path = out_dir / "cost_accuracy.png"
@@ -328,15 +429,17 @@ def main():
     args = parse_args()
     local_df = load_local(Path(args.results))
     local_acc = load_accuracy(Path(args.accuracy))
+    qwen_df = load_qwen(Path(args.qwen_results))
+    qwen_acc = load_accuracy(Path(args.qwen_accuracy)) if qwen_df is not None else None
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    comparison_df = build_comparison_df(local_df, local_acc, args.hardware_rate)
+    comparison_df = build_comparison_df(local_df, local_acc, args.hardware_rate, qwen_df, qwen_acc)
     write_comparison_csv(comparison_df, Path(args.csv))
 
-    plot_throughput(local_df, PLOTS_DIR)
-    plot_memory(local_df, PLOTS_DIR)
+    plot_throughput(local_df, PLOTS_DIR, qwen_df)
+    plot_memory(local_df, PLOTS_DIR, qwen_df)
     plot_throughput_by_config(local_df, PLOTS_DIR)
-    plot_accuracy(local_acc, PLOTS_DIR)
+    plot_accuracy(local_acc, PLOTS_DIR, qwen_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
