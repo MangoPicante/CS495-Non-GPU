@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Title:** Non-GPU LLM Training: Efficient Transformer Training with BitNet
+**Title:** Non-GPU LLM Inference: Benchmarking BitNet b1.58 2B4T and Qwen2.5-1.5B on CPU
 **Author:** Sean Michael
 **Date:** April 27, 2026
 
@@ -11,16 +11,18 @@
 | Dependency | Location |
 | --- | --- |
 | `bitnet.cpp` (built) | `../Models/BitNet` (external — outside this repo) |
+| `llama.cpp` for Qwen (built) | `../Models/Qwen/llama.cpp` (external — outside this repo) |
 
 ### Description
 
-An independent reproduction and extension of Microsoft's published inference benchmarks for BitNet b1.58 2B4T ([arXiv:2504.12285](https://arxiv.org/abs/2504.12285)). Rather than training models from scratch, this project runs the BitNet b1.58 2B4T GGUF model locally via `bitnet.cpp` and benchmarks inference latency, throughput, memory footprint, and energy consumption on commodity CPU hardware. Accuracy results are compared against Microsoft's published FP16 baselines — LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, and MiniCPM 2B — to validate whether 1-bit quantization delivers meaningful real-world efficiency gains without significant accuracy loss.
+An independent reproduction and extension of Microsoft's published inference benchmarks for BitNet b1.58 2B4T ([arXiv:2504.12285](https://arxiv.org/abs/2504.12285)). Rather than training models from scratch, this project runs the BitNet b1.58 2B4T GGUF model locally via `bitnet.cpp` and benchmarks inference latency, throughput, memory footprint, and energy consumption on commodity CPU hardware. Qwen2.5-1.5B-Instruct Q8_0 is benchmarked alongside BitNet as a practical FP16-comparable CPU baseline using upstream `llama.cpp`. Accuracy results are compared against Microsoft's published FP16 baselines — LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, and MiniCPM 2B — to validate whether 1-bit quantization delivers meaningful real-world efficiency gains without significant accuracy loss.
 
 ### Objectives
 
 - Run the pre-trained BitNet b1.58 2B4T model locally via `bitnet.cpp` on CPU hardware
-- Independently benchmark inference latency, throughput, memory footprint, and energy consumption
-- Evaluate output quality via zero-shot accuracy on standard NLP benchmarks (MMLU, HellaSwag, ARC, etc.)
+- Run Qwen2.5-1.5B-Instruct Q8_0 via upstream `llama.cpp` as a practical CPU baseline
+- Independently benchmark inference latency, throughput, memory footprint, and energy consumption for both models
+- Evaluate output quality via zero-shot accuracy on standard NLP benchmarks (MMLU, HellaSwag, ARC, WinoGrande)
 - Compare locally measured efficiency numbers against Microsoft's published results (arXiv:2504.12285)
 - Compare accuracy results against published FP16 baselines: LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, and MiniCPM 2B
 - Produce a cost-accuracy trade-off analysis including a carbon footprint proxy
@@ -36,6 +38,12 @@ An independent reproduction and extension of Microsoft's published inference ben
   - [x] Summarize the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
   - [x] Document the absmean quantization function and Straight-Through Estimator in @BITNET_SUMMARY.md
   - [x] Document published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
+- [ ] Create @QWEN_SUMMARY.md to describe the Qwen2.5-1.5B-Instruct baseline
+  - [ ] Summarize the Qwen2.5 model family and the 1.5B-Instruct variant's architecture and training
+  - [ ] Explain Q8_0 quantization and its expected accuracy vs FP16 trade-off
+  - [ ] Document published accuracy numbers for Qwen2.5 1.5B (ARC, HellaSwag, WinoGrande, MMLU)
+  - [ ] Explain why Qwen was chosen as the CPU baseline (size class, licensing, GGUF availability)
+  - [ ] Document the inference stack: upstream `llama.cpp` vs BitNet's fork, and key differences
 
 ### Phase 2 — Environment Setup & Model Acquisition
 
@@ -47,20 +55,28 @@ An independent reproduction and extension of Microsoft's published inference ben
 - [x] Set up `scripts/eval_accuracy.py` for accuracy evaluation
 - [x] Set up `scripts/metrics_tracker.py` to record latency, memory, energy (CodeCarbon), and throughput per run
 - [x] Smoke-test scripts/metrics_tracker.py and scripts/eval_accuracy.py to confirm both run without errors and produce well-formed output (`make smoke-test`)
+- [x] Clone upstream `llama.cpp` and build for Qwen (`make qwen-setup`)
+- [x] Download Qwen2.5-1.5B-Instruct Q8_0 GGUF (`make qwen-model`)
+- [x] Verify Qwen inference (`make qwen-verify`)
+- [x] Extend `eval_accuracy.py` and `metrics_tracker.py` to work with any llama.cpp build, not just BitNet
 
 ### Phase 3 — Inference Benchmarking
 
-- [x] Run inference latency and throughput benchmarks on BitNet b1.58 2B4T via `make benchmark`
+- [x] Run inference latency and throughput benchmarks on BitNet b1.58 2B4T (`make benchmark-bitnet`)
 - [x] Record latency (ms per token), throughput (tokens/s), and peak memory to @step_metrics.csv
-- [x] Run `scripts/eval_accuracy.py` on BitNet b1.58 2B4T (ARC, HellaSwag, WinoGrande, MMLU)
+- [x] Run `scripts/eval_accuracy.py` on BitNet b1.58 2B4T (ARC-Easy, ARC-Challenge, WinoGrande, HellaSwag, MMLU 5-shot)
 - [x] Log energy consumption per run using CodeCarbon to @step_metrics.csv
 - [x] Create @REPORT.md and record all results; sanity-check against arXiv:2504.12285 Tables
+- [ ] Run inference latency and throughput benchmarks on Qwen2.5-1.5B-Instruct Q8_0 (`make benchmark-qwen`)
+- [ ] Run accuracy evaluation on Qwen2.5-1.5B-Instruct Q8_0 (`make eval-accuracy-qwen`)
 
 ### Phase 4 — Cost Comparison
 
-- [x] Compile local benchmark results alongside published FP16 baselines (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) into @comparison_table.csv
+- [x] Compile BitNet local benchmark results alongside published FP16 baselines into @comparison_table.csv
 - [x] Run `scripts/compare_runs.py` (`make plots`) to generate throughput, memory, and accuracy comparison plots
 - [x] Compute cost-accuracy trade-off (dollar cost proxy: time × hardware rate)
+- [x] Update `compare_runs.py` to include Qwen "ours" data when available
+- [ ] Add Qwen to final plots once `make benchmark-qwen` and `make eval-accuracy-qwen` have been run
 - [ ] Estimate carbon footprint using CodeCarbon measurements and compare against FP16 estimates from the literature
 - [ ] Produce final benchmark dashboard (plots + @comparison_table.csv) in @FINAL_REPORT.md
 
