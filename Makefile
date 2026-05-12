@@ -33,10 +33,12 @@ QWEN_SERVER        ?= $(QWEN_LLAMACPP_DIR)/build/bin/Release/llama-server.exe
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
         qwen-setup qwen-clone qwen-build qwen-model qwen-verify qwen-clean \
         benchmark plots smoke-test smoke-test-bitnet smoke-test-qwen \
-        eval-arc-easy eval-arc-challenge eval-mmlu eval-winogrande eval-hellaswag \
-        eval-arc-easy-qwen eval-arc-challenge-qwen eval-mmlu-qwen \
-        eval-winogrande-qwen eval-hellaswag-qwen \
-        eval-accuracy eval-accuracy-qwen \
+        eval-arc-easy-bitnet eval-arc-easy-qwen eval-arc-easy \
+        eval-arc-challenge-bitnet eval-arc-challenge-qwen eval-arc-challenge \
+        eval-mmlu-bitnet eval-mmlu-qwen eval-mmlu \
+        eval-winogrande-bitnet eval-winogrande-qwen eval-winogrande \
+        eval-hellaswag-bitnet eval-hellaswag-qwen eval-hellaswag \
+        eval-accuracy-bitnet eval-accuracy-qwen eval-accuracy \
         clean nuke
 
 help:
@@ -70,19 +72,25 @@ help:
 	@echo "  qwen-clean          Remove \$$(QWEN_DIR)"
 	@echo ""
 	@echo "Benchmarks & analysis:"
-	@echo "  benchmark           Run inference benchmark (latency, throughput, memory, energy)"
-	@echo "  eval-arc-easy       BitNet ARC-Easy eval (LIMIT=$(LIMIT))"
-	@echo "  eval-arc-challenge  BitNet ARC-Challenge eval (LIMIT=$(LIMIT))"
-	@echo "  eval-mmlu           BitNet MMLU eval 5-shot (LIMIT=$(LIMIT))"
-	@echo "  eval-winogrande     BitNet WinoGrande eval (LIMIT=$(LIMIT))"
-	@echo "  eval-hellaswag      BitNet HellaSwag eval (LIMIT=$(LIMIT))"
-	@echo "  eval-accuracy       Run all BitNet accuracy evals (arc_easy/challenge/mmlu/winogrande/hellaswag)"
-	@echo "  eval-arc-easy-qwen       Qwen ARC-Easy eval (LIMIT=$(LIMIT))"
-	@echo "  eval-arc-challenge-qwen  Qwen ARC-Challenge eval (LIMIT=$(LIMIT))"
-	@echo "  eval-mmlu-qwen           Qwen MMLU eval 5-shot (LIMIT=$(LIMIT))"
-	@echo "  eval-winogrande-qwen     Qwen WinoGrande eval (LIMIT=$(LIMIT))"
-	@echo "  eval-hellaswag-qwen      Qwen HellaSwag eval (LIMIT=$(LIMIT))"
-	@echo "  eval-accuracy-qwen       Run all Qwen accuracy evals"
+	@echo "  benchmark                Run inference benchmark (latency, throughput, memory, energy)"
+	@echo "  eval-arc-easy-bitnet     BitNet ARC-Easy eval (LIMIT=$(LIMIT))"
+	@echo "  eval-arc-easy-qwen       Qwen    ARC-Easy eval (LIMIT=$(LIMIT))"
+	@echo "  eval-arc-easy            Both models ARC-Easy"
+	@echo "  eval-arc-challenge-bitnet  BitNet ARC-Challenge eval (LIMIT=$(LIMIT))"
+	@echo "  eval-arc-challenge-qwen    Qwen   ARC-Challenge eval (LIMIT=$(LIMIT))"
+	@echo "  eval-arc-challenge         Both models ARC-Challenge"
+	@echo "  eval-mmlu-bitnet         BitNet MMLU 5-shot eval (LIMIT=$(LIMIT))"
+	@echo "  eval-mmlu-qwen           Qwen   MMLU 5-shot eval (LIMIT=$(LIMIT))"
+	@echo "  eval-mmlu                Both models MMLU"
+	@echo "  eval-winogrande-bitnet   BitNet WinoGrande eval (LIMIT=$(LIMIT))"
+	@echo "  eval-winogrande-qwen     Qwen   WinoGrande eval (LIMIT=$(LIMIT))"
+	@echo "  eval-winogrande          Both models WinoGrande"
+	@echo "  eval-hellaswag-bitnet    BitNet HellaSwag eval (LIMIT=$(LIMIT))"
+	@echo "  eval-hellaswag-qwen      Qwen   HellaSwag eval (LIMIT=$(LIMIT))"
+	@echo "  eval-hellaswag           Both models HellaSwag"
+	@echo "  eval-accuracy-bitnet     All tasks, BitNet only"
+	@echo "  eval-accuracy-qwen       All tasks, Qwen only"
+	@echo "  eval-accuracy            All tasks, both models"
 	@echo "  plots               Generate plots + comparison_table.csv from benchmark and accuracy results"
 	@echo "  smoke-test          Verify scripts produce expected outputs (both models)"
 	@echo "  smoke-test-bitnet   Verify BitNet inference only"
@@ -243,7 +251,9 @@ benchmark:
 		--model $(MODEL) \
 		--threads $(THREADS)
 
-eval-arc-easy:
+QWEN_ACC_OUT ?= results/qwen_accuracy_results.json
+
+eval-arc-easy-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task arc_easy \
 		--bitnet-dir $(BITNET_DIR) \
@@ -251,47 +261,6 @@ eval-arc-easy:
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
 		--start-server
-
-eval-arc-challenge:
-	$(POETRY) run python scripts/eval_accuracy.py \
-		--task arc_challenge \
-		--bitnet-dir $(BITNET_DIR) \
-		--model $(MODEL) \
-		--threads $(THREADS) \
-		--limit $(LIMIT) \
-		--start-server
-
-eval-mmlu:
-	$(POETRY) run python scripts/eval_accuracy.py \
-		--task mmlu \
-		--num-fewshot 5 \
-		--bitnet-dir $(BITNET_DIR) \
-		--model $(MODEL) \
-		--threads $(THREADS) \
-		--limit $(LIMIT) \
-		--start-server
-
-eval-winogrande:
-	$(POETRY) run python scripts/eval_accuracy.py \
-		--task winogrande \
-		--bitnet-dir $(BITNET_DIR) \
-		--model $(MODEL) \
-		--threads $(THREADS) \
-		--limit $(LIMIT) \
-		--start-server
-
-eval-hellaswag:
-	$(POETRY) run python scripts/eval_accuracy.py \
-		--task hellaswag \
-		--bitnet-dir $(BITNET_DIR) \
-		--model $(MODEL) \
-		--threads $(THREADS) \
-		--limit $(LIMIT) \
-		--start-server
-
-eval-accuracy: eval-arc-easy eval-arc-challenge eval-mmlu eval-winogrande eval-hellaswag
-
-QWEN_ACC_OUT ?= results/qwen_accuracy_results.json
 
 eval-arc-easy-qwen:
 	$(POETRY) run python scripts/eval_accuracy.py \
@@ -303,6 +272,17 @@ eval-arc-easy-qwen:
 		--out $(QWEN_ACC_OUT) \
 		--start-server
 
+eval-arc-easy: eval-arc-easy-bitnet eval-arc-easy-qwen
+
+eval-arc-challenge-bitnet:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task arc_challenge \
+		--bitnet-dir $(BITNET_DIR) \
+		--model $(MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--start-server
+
 eval-arc-challenge-qwen:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task arc_challenge \
@@ -311,6 +291,18 @@ eval-arc-challenge-qwen:
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
 		--out $(QWEN_ACC_OUT) \
+		--start-server
+
+eval-arc-challenge: eval-arc-challenge-bitnet eval-arc-challenge-qwen
+
+eval-mmlu-bitnet:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task mmlu \
+		--num-fewshot 5 \
+		--bitnet-dir $(BITNET_DIR) \
+		--model $(MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
 		--start-server
 
 eval-mmlu-qwen:
@@ -324,6 +316,17 @@ eval-mmlu-qwen:
 		--out $(QWEN_ACC_OUT) \
 		--start-server
 
+eval-mmlu: eval-mmlu-bitnet eval-mmlu-qwen
+
+eval-winogrande-bitnet:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task winogrande \
+		--bitnet-dir $(BITNET_DIR) \
+		--model $(MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--start-server
+
 eval-winogrande-qwen:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task winogrande \
@@ -332,6 +335,17 @@ eval-winogrande-qwen:
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
 		--out $(QWEN_ACC_OUT) \
+		--start-server
+
+eval-winogrande: eval-winogrande-bitnet eval-winogrande-qwen
+
+eval-hellaswag-bitnet:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task hellaswag \
+		--bitnet-dir $(BITNET_DIR) \
+		--model $(MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
 		--start-server
 
 eval-hellaswag-qwen:
@@ -344,7 +358,13 @@ eval-hellaswag-qwen:
 		--out $(QWEN_ACC_OUT) \
 		--start-server
 
+eval-hellaswag: eval-hellaswag-bitnet eval-hellaswag-qwen
+
+eval-accuracy-bitnet: eval-arc-easy-bitnet eval-arc-challenge-bitnet eval-mmlu-bitnet eval-winogrande-bitnet eval-hellaswag-bitnet
+
 eval-accuracy-qwen: eval-arc-easy-qwen eval-arc-challenge-qwen eval-mmlu-qwen eval-winogrande-qwen eval-hellaswag-qwen
+
+eval-accuracy: eval-accuracy-bitnet eval-accuracy-qwen
 
 plots:
 	$(POETRY) run python scripts/compare_runs.py
