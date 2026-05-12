@@ -252,13 +252,13 @@ QWEN_BENCH_OUT ?= results/qwen_metrics.csv
 
 benchmark-bitnet:
 	$(POETRY) run python scripts/metrics_tracker.py \
-		--bitnet-dir $(BITNET_DIR) \
+		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS)
 
 benchmark-qwen:
 	$(POETRY) run python scripts/metrics_tracker.py \
-		--bitnet-dir $(QWEN_LLAMACPP_DIR) \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_MODEL) \
 		--out $(QWEN_BENCH_OUT) \
 		--threads $(THREADS)
@@ -270,7 +270,7 @@ QWEN_ACC_OUT ?= results/qwen_accuracy_results.json
 eval-arc-easy-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task arc_easy \
-		--bitnet-dir $(BITNET_DIR) \
+		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -279,7 +279,7 @@ eval-arc-easy-bitnet:
 eval-arc-easy-qwen:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task arc_easy \
-		--bitnet-dir $(QWEN_LLAMACPP_DIR) \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -291,7 +291,7 @@ eval-arc-easy: eval-arc-easy-bitnet eval-arc-easy-qwen
 eval-arc-challenge-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task arc_challenge \
-		--bitnet-dir $(BITNET_DIR) \
+		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -300,7 +300,7 @@ eval-arc-challenge-bitnet:
 eval-arc-challenge-qwen:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task arc_challenge \
-		--bitnet-dir $(QWEN_LLAMACPP_DIR) \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -313,7 +313,7 @@ eval-mmlu-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task mmlu \
 		--num-fewshot 5 \
-		--bitnet-dir $(BITNET_DIR) \
+		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -323,7 +323,7 @@ eval-mmlu-qwen:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task mmlu \
 		--num-fewshot 5 \
-		--bitnet-dir $(QWEN_LLAMACPP_DIR) \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -335,7 +335,7 @@ eval-mmlu: eval-mmlu-bitnet eval-mmlu-qwen
 eval-winogrande-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task winogrande \
-		--bitnet-dir $(BITNET_DIR) \
+		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -344,7 +344,7 @@ eval-winogrande-bitnet:
 eval-winogrande-qwen:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task winogrande \
-		--bitnet-dir $(QWEN_LLAMACPP_DIR) \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -356,7 +356,7 @@ eval-winogrande: eval-winogrande-bitnet eval-winogrande-qwen
 eval-hellaswag-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task hellaswag \
-		--bitnet-dir $(BITNET_DIR) \
+		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \
@@ -365,7 +365,7 @@ eval-hellaswag-bitnet:
 eval-hellaswag-qwen:
 	$(POETRY) run python scripts/eval_accuracy.py \
 		--task hellaswag \
-		--bitnet-dir $(QWEN_LLAMACPP_DIR) \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_MODEL) \
 		--threads $(THREADS) \
 		--limit $(LIMIT) \

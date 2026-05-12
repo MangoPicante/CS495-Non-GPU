@@ -34,28 +34,28 @@ import requests
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = REPO_ROOT / "results" / "accuracy_results.json"
-DEFAULT_BITNET_DIR = REPO_ROOT.parent / "Models" / "BitNet"
-DEFAULT_MODEL = DEFAULT_BITNET_DIR / "models" / "BitNet-b1.58-2B-4T" / "ggml-model-i2_s.gguf"
+DEFAULT_LLAMA_DIR = REPO_ROOT.parent / "Models" / "BitNet"
+DEFAULT_MODEL = DEFAULT_LLAMA_DIR / "models" / "BitNet-b1.58-2B-4T" / "ggml-model-i2_s.gguf"
 
 # Global server process handle (used when --start-server is set)
 _server_proc: subprocess.Popen | None = None
 _server_args: dict = {}
 
 
-def _find_server_bin(bitnet_dir: Path) -> Path:
+def _find_server_bin(llama_dir: Path) -> Path:
     if platform.system() == "Windows":
-        for p in [bitnet_dir / "build" / "bin" / "Release" / "llama-server.exe",
-                  bitnet_dir / "build" / "bin" / "llama-server.exe"]:
+        for p in [llama_dir / "build" / "bin" / "Release" / "llama-server.exe",
+                  llama_dir / "build" / "bin" / "llama-server.exe"]:
             if p.exists():
                 return p
     else:
-        p = bitnet_dir / "build" / "bin" / "llama-server"
+        p = llama_dir / "build" / "bin" / "llama-server"
         if p.exists():
             return p
-    raise FileNotFoundError(f"llama-server not found in {bitnet_dir}/build")
+    raise FileNotFoundError(f"llama-server not found in {llama_dir}/build")
 
 
-def _start_server(bitnet_dir: Path, model: Path, threads: int, port: int, ctx: int = 4096):
+def _start_server(llama_dir: Path, model: Path, threads: int, port: int, ctx: int = 4096):
     global _server_proc
     if _server_proc is not None:
         _server_proc.terminate()
@@ -63,7 +63,7 @@ def _start_server(bitnet_dir: Path, model: Path, threads: int, port: int, ctx: i
             _server_proc.wait(timeout=5)
         except Exception:
             _server_proc.kill()
-    bin_path = _find_server_bin(bitnet_dir)
+    bin_path = _find_server_bin(llama_dir)
     cmd = [str(bin_path), "-m", str(model), "-c", str(ctx), "-t", str(threads),
            "-ub", "128",  # TL2 kernel BM=160 overflows stack at >=160 tokens/batch
            "-ngl", "0", "--host", "127.0.0.1", "--port", str(port), "-cb"]
@@ -633,7 +633,7 @@ def main():
                         help="Print prompt and expected/predicted answer for each sample")
     parser.add_argument("--start-server", action="store_true",
                         help="Start and manage llama-server automatically")
-    parser.add_argument("--bitnet-dir", type=Path, default=DEFAULT_BITNET_DIR)
+    parser.add_argument("--llama-dir", type=Path, default=DEFAULT_LLAMA_DIR)
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--threads", type=int, default=4)
     args = parser.parse_args()
@@ -645,7 +645,7 @@ def main():
 
     if args.start_server:
         global _server_args
-        _server_args = dict(bitnet_dir=args.bitnet_dir, model=args.model,
+        _server_args = dict(llama_dir=args.llama_dir, model=args.model,
                             threads=args.threads, port=port)
         print(f"Starting llama-server on port {port}...")
         if not _start_server(**_server_args):

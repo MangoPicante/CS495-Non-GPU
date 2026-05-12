@@ -9,13 +9,13 @@ are appended to the output CSV (default: results/step_metrics.csv).
 Usage:
     # BitNet
     python scripts/metrics_tracker.py \
-        --bitnet-dir ../Models/BitNet \
+        --llama-dir ../Models/BitNet \
         --model ../Models/BitNet/models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
         --threads 4
 
     # Qwen (or any other llama.cpp build)
     python scripts/metrics_tracker.py \
-        --bitnet-dir ../Models/Qwen/llama.cpp \
+        --llama-dir ../Models/Qwen/llama.cpp \
         --model ../Models/Qwen/qwen2.5-1.5b-instruct-q8_0.gguf \
         --out results/qwen_metrics.csv \
         --threads 4
@@ -61,7 +61,7 @@ BENCH_CONFIGS = [
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--bitnet-dir", required=True, help="Path to a built llama.cpp repo (BitNet or Qwen)")
+    p.add_argument("--llama-dir", required=True, help="Path to a built llama.cpp repo (BitNet or Qwen)")
     p.add_argument("--model", required=True, help="Path to .gguf model file")
     p.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output CSV path")
     p.add_argument("--threads", type=int, default=4)
@@ -78,15 +78,15 @@ def parse_args():
     return p.parse_args()
 
 
-def find_llama_bench(bitnet_dir: Path) -> Path:
-    candidate = bitnet_dir / "build" / "bin" / "Release" / "llama-bench.exe"
+def find_llama_bench(llama_dir: Path) -> Path:
+    candidate = llama_dir / "build" / "bin" / "Release" / "llama-bench.exe"
     if candidate.exists():
         return candidate
     # fallback for non-Windows builds
-    candidate2 = bitnet_dir / "build" / "bin" / "llama-bench"
+    candidate2 = llama_dir / "build" / "bin" / "llama-bench"
     if candidate2.exists():
         return candidate2
-    sys.exit(f"llama-bench not found under {bitnet_dir}/build. Run 'make bitnet-build' or 'make qwen-build' first.")
+    sys.exit(f"llama-bench not found under {llama_dir}/build. Run 'make bitnet-build' or 'make qwen-build' first.")
 
 
 def run_bench(llama_bench: Path, model: Path, n_prompt: int, n_gen: int, threads: int, ubatch: int = 128):
@@ -160,13 +160,13 @@ def append_row(row: dict, out: Path):
 
 def main():
     args = parse_args()
-    bitnet_dir = Path(args.bitnet_dir)
+    llama_dir = Path(args.llama_dir)
     model = Path(args.model)
     out = args.out
     if not model.exists():
         sys.exit(f"Model not found: {model}")
 
-    llama_bench = find_llama_bench(bitnet_dir)
+    llama_bench = find_llama_bench(llama_dir)
     ensure_csv(out)
 
     tracker = None
