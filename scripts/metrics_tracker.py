@@ -61,7 +61,7 @@ BENCH_CONFIGS = [
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--llama-dir", required=True, help="Path to a built llama.cpp repo (BitNet or Qwen)")
+    p.add_argument("--llama-dir", required=True, help="Path to a built llama.cpp repo")
     p.add_argument("--model", required=True, help="Path to .gguf model file")
     p.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output CSV path")
     p.add_argument("--threads", type=int, default=4)
@@ -177,8 +177,8 @@ def main():
                 from codecarbon import EmissionsTracker
             logging.getLogger("codecarbon").setLevel(logging.CRITICAL)
             tracker = EmissionsTracker(
-                project_name="bitnet-benchmark",
-                output_dir=str(RESULTS_CSV.parent),
+                project_name="llama-benchmark",
+                output_dir=str(out.parent),
                 log_level="error",
                 save_to_file=False,
             )

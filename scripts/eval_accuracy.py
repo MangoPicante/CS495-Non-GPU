@@ -1,5 +1,5 @@
 """
-eval_accuracy.py — Evaluate BitNet b1.58 2B4T on multiple-choice benchmarks.
+eval_accuracy.py — Evaluate llama.cpp-based models on multiple-choice benchmarks.
 
 Two scoring strategies are used depending on the task:
 
@@ -11,7 +11,7 @@ Two scoring strategies are used depending on the task:
     Compute sum of log P(token_i | context + tokens_0..i-1) over all tokens in
     each candidate continuation, then pick the highest.  HellaSwag scores are
     additionally normalized by token count to remove length bias.  This matches
-    the methodology used in the BitNet paper for these two tasks and produces
+    the methodology used in the paper (arXiv:2504.12285) for these tasks and produces
     meaningful scores rather than near-random letter-guessing.
 
 Supported tasks: arc_easy, arc_challenge, winogrande, hellaswag, mmlu
@@ -65,7 +65,7 @@ def _start_server(llama_dir: Path, model: Path, threads: int, port: int, ctx: in
             _server_proc.kill()
     bin_path = _find_server_bin(llama_dir)
     cmd = [str(bin_path), "-m", str(model), "-c", str(ctx), "-t", str(threads),
-           "-ub", "128",  # TL2 kernel BM=160 overflows stack at >=160 tokens/batch
+           "-ub", "128",  # conservative default; BitNet TL2 kernels require <=128
            "-ngl", "0", "--host", "127.0.0.1", "--port", str(port), "-cb"]
     _server_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}/health"
@@ -619,7 +619,7 @@ def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate BitNet on multiple-choice benchmarks")
+    parser = argparse.ArgumentParser(description="Evaluate a llama.cpp model on multiple-choice benchmarks")
     parser.add_argument("--task", choices=TASKS + ["all"], default="arc_easy")
     parser.add_argument("--num-fewshot", type=int, default=0,
                         help="Few-shot count (use 5 for MMLU)")

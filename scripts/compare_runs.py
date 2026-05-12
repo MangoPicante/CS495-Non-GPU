@@ -1,10 +1,12 @@
 """
 Generates comparison plots and a comparison CSV for Phase 4 of the capstone.
 
-Reads results/step_metrics.csv (local BitNet b1.58 2B4T measurements) and
-results/accuracy_results.json, then overlays published FP16 baseline numbers
-from arXiv:2504.12285 Table 1.  Saves plots to results/plots/ and a summary
-CSV to --csv path (default: results/comparison_table.csv).
+Reads local benchmark CSVs and accuracy JSONs, overlays published FP16 baseline
+numbers from arXiv:2504.12285 Table 1, and saves plots to results/plots/ plus a
+summary CSV to --csv (default: results/comparison_table.csv).
+
+  BitNet:  results/step_metrics.csv  +  results/accuracy_results.json
+  Qwen:    results/qwen_metrics.csv  +  results/qwen_accuracy_results.json  (optional)
 
 Hardware rate default: AWS c5.xlarge on-demand, us-east-1 ($0.170/hr, 4 vCPUs).
 On-demand pricing is used rather than spot for reproducibility — spot prices
@@ -15,6 +17,8 @@ Usage:
     python scripts/compare_runs.py
         [--results results/step_metrics.csv]
         [--accuracy results/accuracy_results.json]
+        [--qwen-results results/qwen_metrics.csv]
+        [--qwen-accuracy results/qwen_accuracy_results.json]
         [--csv results/comparison_table.csv]
         [--hardware-rate 0.170]
 """
@@ -128,17 +132,9 @@ def load_qwen(csv_path: Path) -> pd.DataFrame | None:
     return df
 
 
-def _bitnet_row(local_df: pd.DataFrame) -> tuple[float | None, float | None]:
+def _bench_row(df: pd.DataFrame) -> tuple[float | None, float | None]:
     """Return (median throughput, median peak_rss) for the n_prompt=512, n_gen=128 condition."""
-    row = local_df[(local_df["n_prompt"] == 512) & (local_df["n_gen"] == 128)]
-    tps = row["throughput_tokens_s"].median() if not row.empty else None
-    rss = row["peak_rss_mb"].median() if not row.empty else None
-    return tps, rss
-
-
-def _qwen_row(qwen_df: pd.DataFrame) -> tuple[float | None, float | None]:
-    """Return (median throughput, median peak_rss) for Qwen at n_prompt=512, n_gen=128."""
-    row = qwen_df[(qwen_df["n_prompt"] == 512) & (qwen_df["n_gen"] == 128)]
+    row = df[(df["n_prompt"] == 512) & (df["n_gen"] == 128)]
     tps = row["throughput_tokens_s"].median() if not row.empty else None
     rss = row["peak_rss_mb"].median() if not row.empty else None
     return tps, rss
@@ -178,7 +174,7 @@ def build_comparison_df(
         **{f: BITNET_PAPER[f] for f in ACC_FIELDS},
     })
 
-    bitnet_tps, bitnet_rss = _bitnet_row(local_df)
+    bitnet_tps, bitnet_rss = _bench_row(local_df)
     our_cost = round(cost_per_1k(bitnet_tps, hardware_rate), 6) if bitnet_tps else ""
     rows.append({
         "model": "BitNet b1.58 2B4T",
@@ -190,7 +186,7 @@ def build_comparison_df(
     })
 
     if qwen_df is not None:
-        q_tps, q_rss = _qwen_row(qwen_df)
+        q_tps, q_rss = _bench_row(qwen_df)
         q_acc = qwen_acc or {}
         q_cost = round(cost_per_1k(q_tps, hardware_rate), 6) if q_tps else ""
         rows.append({
@@ -214,7 +210,7 @@ def write_comparison_csv(df: pd.DataFrame, out_path: Path) -> None:
 def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | None = None):
     from matplotlib.patches import Patch
 
-    bitnet_tps, _ = _bitnet_row(local_df)
+    bitnet_tps, _ = _bench_row(local_df)
 
     models = (
         list(FP16_BASELINES.keys())
@@ -228,7 +224,7 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame
     hatches = [""]        * len(FP16_BASELINES) + ["///",     ""]
 
     if qwen_df is not None:
-        q_tps, _ = _qwen_row(qwen_df)
+        q_tps, _ = _bench_row(qwen_df)
         models.append("Qwen2.5-1.5B-Instruct Q8_0 (ours)")
         values.append(q_tps if q_tps else 0)
         colors.append("#55A868")
@@ -264,7 +260,7 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame
 def plot_memory(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | None = None):
     from matplotlib.patches import Patch
 
-    _, bitnet_rss = _bitnet_row(local_df)
+    _, bitnet_rss = _bench_row(local_df)
 
     models = (
         list(FP16_BASELINES.keys())
@@ -278,7 +274,7 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | N
     hatches = [""]        * len(FP16_BASELINES) + ["///",     ""]
 
     if qwen_df is not None:
-        _, q_rss = _qwen_row(qwen_df)
+        _, q_rss = _bench_row(qwen_df)
         models.append("Qwen2.5-1.5B-Instruct Q8_0 (ours)")
         values.append(q_rss if q_rss else 0)
         colors.append("#55A868")
