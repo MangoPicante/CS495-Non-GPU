@@ -32,7 +32,8 @@ QWEN_SERVER        ?= $(QWEN_LLAMACPP_DIR)/build/bin/Release/llama-server.exe
         bitnet-setup bitnet-clone bitnet-submodules bitnet-deps \
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
         qwen-setup qwen-clone qwen-build qwen-model qwen-verify qwen-clean \
-        benchmark plots smoke-test smoke-test-bitnet smoke-test-qwen \
+        benchmark-bitnet benchmark-qwen benchmark \
+        plots smoke-test smoke-test-bitnet smoke-test-qwen \
         eval-arc-easy-bitnet eval-arc-easy-qwen eval-arc-easy \
         eval-arc-challenge-bitnet eval-arc-challenge-qwen eval-arc-challenge \
         eval-mmlu-bitnet eval-mmlu-qwen eval-mmlu \
@@ -72,7 +73,9 @@ help:
 	@echo "  qwen-clean          Remove \$$(QWEN_DIR)"
 	@echo ""
 	@echo "Benchmarks & analysis:"
-	@echo "  benchmark                Run inference benchmark (latency, throughput, memory, energy)"
+	@echo "  benchmark-bitnet         BitNet inference benchmark (throughput, memory, energy)"
+	@echo "  benchmark-qwen           Qwen   inference benchmark (throughput, memory, energy)"
+	@echo "  benchmark                Both models"
 	@echo "  eval-arc-easy-bitnet     BitNet ARC-Easy eval (LIMIT=$(LIMIT))"
 	@echo "  eval-arc-easy-qwen       Qwen    ARC-Easy eval (LIMIT=$(LIMIT))"
 	@echo "  eval-arc-easy            Both models ARC-Easy"
@@ -245,11 +248,22 @@ bitnet-verify:
 		-n 32 \
 		-t $(THREADS)
 
-benchmark:
+QWEN_BENCH_OUT ?= results/qwen_metrics.csv
+
+benchmark-bitnet:
 	$(POETRY) run python scripts/metrics_tracker.py \
 		--bitnet-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--threads $(THREADS)
+
+benchmark-qwen:
+	$(POETRY) run python scripts/metrics_tracker.py \
+		--bitnet-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(QWEN_MODEL) \
+		--out $(QWEN_BENCH_OUT) \
+		--threads $(THREADS)
+
+benchmark: benchmark-bitnet benchmark-qwen
 
 QWEN_ACC_OUT ?= results/qwen_accuracy_results.json
 
