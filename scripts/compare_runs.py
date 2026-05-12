@@ -327,11 +327,9 @@ def plot_throughput_by_config(local_df: pd.DataFrame, out_dir: Path):
 
 
 def plot_accuracy(local_acc: dict, out_dir: Path, qwen_acc: dict | None = None):
-    # WinoGrande/HellaSwag omitted: our letter-scoring method is methodology-
-    # incompatible with the paper's continuation scoring, giving near-random results.
-    tasks = ["arc_easy", "arc_challenge", "mmlu"]
-    task_labels = ["ARC-Easy", "ARC-Challenge", "MMLU"]
-    task_colors = ["#4C72B0", "#55A868", "#C44E52"]
+    tasks = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
+    task_labels = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
+    task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
     fp16_models = list(FP16_BASELINES.keys())
     all_models = fp16_models + ["BitNet 2B4T\n(paper)", "BitNet 2B4T\n(ours)"]
@@ -343,7 +341,7 @@ def plot_accuracy(local_acc: dict, out_dir: Path, qwen_acc: dict | None = None):
 
     x = np.arange(len(all_models))
     n_tasks = len(tasks)
-    width = 0.22
+    width = 0.15
     offsets = np.linspace(-(n_tasks - 1) * width / 2, (n_tasks - 1) * width / 2, n_tasks)
 
     fig, ax = plt.subplots(figsize=(max(14, len(all_models) * 1.6), 6))
@@ -359,7 +357,7 @@ def plot_accuracy(local_acc: dict, out_dir: Path, qwen_acc: dict | None = None):
     ax.set_ylim(0, 105)
     ax.set_title(
         "Accuracy Comparison: BitNet b1.58 2B4T vs FP16 Baselines\n"
-        "(ARC-Easy, ARC-Challenge, MMLU — paper: 0-shot except MMLU 5-shot)"
+        "(0-shot except MMLU 5-shot; WinoGrande & HellaSwag use continuation scoring)"
     )
     ax.legend()
     fig.tight_layout()
