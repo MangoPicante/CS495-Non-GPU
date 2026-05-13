@@ -113,20 +113,122 @@ PAPER_TARGETS = {
 # Server helpers
 # ---------------------------------------------------------------------------
 
+import math
+
+# Per-server capability cache populated lazily by _server_caps().
+_SERVER_CAPS: dict[str, dict] = {}
+
+# Bias size used to force a target token. Large enough to dominate softmax
+# across vocab sizes up to ~256k.
+_BIAS_VALUE = 100.0
+
+# n_probs for fallback path (older forks return post-bias probs under logit_bias,
+# so we have to search top-K instead).  5000 covers most continuation tokens; the
+# BitNet fork crashes at much larger values.
+_FALLBACK_N_PROBS = 5000
+
+
 def _decode_tok_str(tok_str: str) -> str:
     return tok_str.replace("Ġ", " ").replace("▁", " ")
 
 
-def _query_completion(server: str, context: str, n_probs: int) -> list | None:
-    """POST one /completion request; return top-token list or None on failure."""
+def _tokenize(server: str, text: str, add_special: bool = True) -> list[int]:
+    """Return token IDs for `text` using the server's tokenizer."""
+    try:
+        r = requests.post(f"{server}/tokenize",
+                          json={"content": text, "add_special": add_special},
+                          timeout=30)
+        return r.json().get("tokens", [])
+    except Exception:
+        return []
+
+
+def _detokenize(server: str, tokens: list[int]) -> str:
+    """Return the text decoded from `tokens`."""
+    try:
+        r = requests.post(f"{server}/detokenize",
+                          json={"tokens": tokens},
+                          timeout=30)
+        return r.json().get("content", "")
+    except Exception:
+        return ""
+
+
+def _server_caps(server: str) -> dict:
+    """
+    Probe the server once to learn how it handles `logit_bias`.
+
+    Modern llama.cpp returns the *natural* (pre-bias) logprob of the forced
+    token when `post_sampling_probs:false` is set — this lets us read
+    log P(target | context) exactly, for any target.
+
+    Older forks (e.g. the BitNet llama.cpp fork) apply the bias before
+    reporting probs, so the forced token always comes back at prob≈1.0; we
+    must fall back to top-K search instead.
+
+    Detection: force " London" after "The capital of France is".  A natural
+    response gives logprob ≈ -7; a post-bias response gives ≈ 0.
+
+    Returns {"bias_natural": bool, "fmt": "new"|"old"}.
+    """
+    if server in _SERVER_CAPS:
+        return _SERVER_CAPS[server]
+    caps = {"bias_natural": False, "fmt": "old"}
+    try:
+        toks = _tokenize(server, " London", add_special=False)
+        if not toks:
+            _SERVER_CAPS[server] = caps
+            return caps
+        target_id = toks[0]
+        r = requests.post(f"{server}/completion", json={
+            "prompt": "The capital of France is",
+            "n_predict": 1,
+            "n_probs": 1,
+            "temperature": 0.0,
+            "post_sampling_probs": False,
+            "logit_bias": [[target_id, _BIAS_VALUE]],
+        }, timeout=30)
+        data = r.json()
+        cp = data.get("completion_probabilities", [])
+        if cp:
+            item = cp[0]
+            if "logprob" in item or "top_logprobs" in item:
+                caps["fmt"] = "new"
+                lp = item.get("logprob", 0.0)
+                if lp < -1.0:
+                    caps["bias_natural"] = True
+            elif "probs" in item:
+                caps["fmt"] = "old"
+                probs = item["probs"]
+                if probs and probs[0].get("prob", 1.0) < 0.5:
+                    caps["bias_natural"] = True
+    except Exception:
+        pass
+    _SERVER_CAPS[server] = caps
+    return caps
+
+
+def _post_completion(
+    server: str,
+    prompt: list[int] | str,
+    n_probs: int,
+    target_id: int | None = None,
+    cache_prompt: bool = True,
+) -> dict | None:
+    """POST one /completion request; return completion_probabilities[0] or None."""
+    body = {
+        "prompt": prompt,
+        "n_predict": 1,
+        "n_probs": n_probs,
+        "temperature": 0.0,
+        "cache_prompt": cache_prompt,
+        "post_sampling_probs": False,
+    }
+    if target_id is not None:
+        body["logit_bias"] = [[target_id, _BIAS_VALUE]]
     for attempt in range(3):
         try:
-            r = requests.post(f"{server}/completion", json={
-                "prompt": context,
-                "n_predict": 1,
-                "n_probs": n_probs,
-                "temperature": 0.0,
-            }, timeout=60)
+            r = requests.post(f"{server}/completion", json=body, timeout=120)
         except requests.exceptions.ConnectionError:
             if attempt < 2:
                 restarted = ensure_server(server)
@@ -139,26 +241,46 @@ def _query_completion(server: str, context: str, n_probs: int) -> list | None:
             data = r.json()
         except Exception:
             return None
-        probs_list = data.get("completion_probabilities", [])
-        if not probs_list:
-            return []
-        item = probs_list[0]
-        # New llama.cpp: {"token": "...", "logprob": ..., "top_logprobs": [...]}
-        # Old llama.cpp: {"probs": [{"tok_str": "...", "prob": ...}]}
-        return item.get("top_logprobs") or item.get("probs", [])
+        cp = data.get("completion_probabilities", [])
+        return cp[0] if cp else None
     return None
+
+
+def _find_token_logprob(item: dict, target_id: int, target_str: str) -> float | None:
+    """Locate `target_id`/`target_str` in the response's top-K list; None if absent."""
+    if "top_logprobs" in item:
+        for p in item["top_logprobs"]:
+            if p.get("id") == target_id:
+                return p.get("logprob")
+        return None
+    if "probs" in item:
+        for p in item["probs"]:
+            if p.get("tok_str") == target_str:
+                prob = p.get("prob", 0.0)
+                return math.log(prob) if prob > 0 else None
+        return None
+    return None
+
+
+def _min_logprob(item: dict) -> float:
+    """Smallest logprob in the response's top-K, used as a conservative bound."""
+    if "top_logprobs" in item:
+        lps = [p.get("logprob", 0.0) for p in item["top_logprobs"]]
+        return min(lps) if lps else 0.0
+    if "probs" in item:
+        lps = [math.log(p["prob"]) for p in item["probs"]
+               if 0 < p.get("prob", 0) < 1]
+        return min(lps) if lps else 0.0
+    return 0.0
 
 
 def _best_prefix_match(top_tokens: list, target: str) -> tuple[float, str]:
     """
     Find the token in top_tokens whose decoded form is the longest prefix of
     target.  Returns (log_prob, matched_text) or (float('-inf'), '') if none match.
-
-    Handles both llama.cpp response formats:
-      Old: {"tok_str": "▁A", "prob": 0.8}   (prob is a probability, must log it)
-      New: {"token": " A",  "logprob": -0.2} (already a log-probability)
+    Used only by first_token_logprob (ARC/MMLU), where the target is a single
+    label character and reliably appears in top-K.
     """
-    import math
     best_logprob = None
     best_len = 0
     best_decoded = ""
@@ -179,10 +301,13 @@ def _best_prefix_match(top_tokens: list, target: str) -> tuple[float, str]:
 
 def first_token_logprob(server: str, context: str, choice: str, n_probs: int = 100) -> float:
     """Return log P(first token of choice | context).  Used by ARC and MMLU."""
-    top_tokens = _query_completion(server, context, n_probs)
-    if not top_tokens:
+    item = _post_completion(server, context, n_probs=n_probs)
+    if not item:
         return float("-inf")
-    logp, _ = _best_prefix_match(top_tokens, choice)
+    top = item.get("top_logprobs") or item.get("probs", [])
+    if not top:
+        return float("-inf")
+    logp, _ = _best_prefix_match(top, choice)
     return logp
 
 
@@ -190,39 +315,75 @@ def continuation_logprob(
     server: str, context: str, continuation: str, normalize: bool = False
 ) -> float:
     """
-    Return sum of log P(token_i | context + tokens_0..i-1) over every token in
-    `continuation`, making one API call per token.
+    Score Σ log P(t_i | ctx, t_0..t_i-1) over the tokens of `continuation` in
+    token space.  Used by WinoGrande and HellaSwag.
 
-    If normalize=True the sum is divided by token count (use for HellaSwag to
-    remove length bias between candidate endings of unequal length).
+    Strategy depends on the server (detected once via _server_caps):
 
-    The leading space in `continuation` should encode the word-boundary: BPE
-    tokenizers represent word-initial tokens with a Ġ prefix (decoded as " "),
-    so pass " " + word rather than just word when the continuation begins a new
-    word after a non-space context.
+      * Modern llama.cpp: force each target token with logit_bias and
+        post_sampling_probs:false, then read its *natural* logprob from the
+        response.  Exact for every token regardless of rarity.
+
+      * Older forks (BitNet's): logit_bias is applied before the reported
+        probs, so forcing is unusable.  Fall back to top-K search with
+        n_probs=5000; for tokens rarer than top-K, use the smallest seen
+        logprob minus a small penalty (a conservative lower bound that keeps
+        comparisons across candidate continuations meaningful).
+
+    If normalize=True, returns mean per-token logprob (length-normalized;
+    use for HellaSwag).
     """
-    total = 0.0
-    n_tokens = 0
-    current_ctx = context
-    remaining = continuation
-
-    while remaining:
-        if not remaining.strip():
-            break
-        top_tokens = _query_completion(server, current_ctx, n_probs=500)
-        if top_tokens is None:
-            return float("-inf")
-        logp, consumed = _best_prefix_match(top_tokens, remaining)
-        if logp == float("-inf") or not consumed:
-            return float("-inf")
-        total += logp
-        current_ctx += consumed
-        remaining = remaining[len(consumed):]
-        n_tokens += 1
-
-    if n_tokens == 0:
+    ctx_tokens = _tokenize(server, context, add_special=True)
+    full_tokens = _tokenize(server, context + continuation, add_special=True)
+    if not ctx_tokens or not full_tokens:
         return float("-inf")
-    return total / n_tokens if normalize else total
+
+    # Align boundary: full must start with ctx.  If BPE merged across the
+    # boundary, walk ctx back to the longest common prefix.
+    if full_tokens[:len(ctx_tokens)] != ctx_tokens:
+        n = 0
+        for a, b in zip(ctx_tokens, full_tokens):
+            if a != b:
+                break
+            n += 1
+        ctx_tokens = full_tokens[:n]
+
+    cont_tokens = full_tokens[len(ctx_tokens):]
+    if not cont_tokens:
+        return float("-inf")
+
+    caps = _server_caps(server)
+    use_bias = caps["bias_natural"]
+
+    total = 0.0
+    prompt_tokens = list(ctx_tokens)
+
+    for target_id in cont_tokens:
+        if use_bias:
+            item = _post_completion(server, prompt_tokens, n_probs=1, target_id=target_id)
+            if not item:
+                return float("-inf")
+            lp = item.get("logprob")
+            if lp is None:
+                probs = item.get("probs", [])
+                if probs:
+                    prob = probs[0].get("prob", 0.0)
+                    lp = math.log(prob) if prob > 0 else None
+            if lp is None:
+                return float("-inf")
+        else:
+            item = _post_completion(server, prompt_tokens, n_probs=_FALLBACK_N_PROBS)
+            if not item:
+                return float("-inf")
+            target_str = _detokenize(server, [target_id])
+            lp = _find_token_logprob(item, target_id, target_str)
+            if lp is None:
+                # Rarer than top-K: use min seen logprob as a conservative bound.
+                lp = _min_logprob(item) - 1.0
+        total += lp
+        prompt_tokens.append(target_id)
+
+    return total / len(cont_tokens) if normalize else total
 
 
 # ---------------------------------------------------------------------------
@@ -309,9 +470,16 @@ def _load_task_checkpoint(out: Path | None, task: str) -> dict:
 
 def eval_winogrande(ds, server: str, out: Path | None = None) -> dict:
     """
-    Continuation scoring: score each option as a direct completion of the sentence
-    prefix (text before the blank).  Strip the trailing space from the prefix and
-    prepend it to the option so the BPE Ġ word-boundary token aligns correctly.
+    Partial-context scoring (lm-eval-harness methodology):
+
+      Replace "_" with each option, then score log P(suffix | prefix + option),
+      where suffix is the part of the sentence AFTER the blank.  The model
+      uses the surrounding context to judge which fill-in produces a coherent
+      sentence — this is what WinoGrande actually tests.
+
+      The earlier P(option | prefix) approach ignores everything after the
+      blank, which is where the disambiguating signal lives, and scores near
+      random.
     """
     correct = 0
     skipped = 0
@@ -323,9 +491,12 @@ def eval_winogrande(ds, server: str, out: Path | None = None) -> dict:
         print(f"  Resuming winogrande: {n_processed}/{len(ds)} samples done.", flush=True)
 
     for row in ds.select(range(n_processed, len(ds))):
-        prefix = row["sentence"].split("_")[0].rstrip()
-        s1 = continuation_logprob(server, prefix, " " + row["option1"])
-        s2 = continuation_logprob(server, prefix, " " + row["option2"])
+        sentence = row["sentence"]
+        blank = sentence.index("_")
+        prefix = sentence[:blank]
+        suffix = " " + sentence[blank + 1:].strip()
+        s1 = continuation_logprob(server, prefix + row["option1"], suffix)
+        s2 = continuation_logprob(server, prefix + row["option2"], suffix)
         if s1 == float("-inf") and s2 == float("-inf"):
             skipped += 1
         else:
@@ -386,11 +557,29 @@ def prefetch_all_datasets(tasks: list[str], limit: int | None, max_subjects: int
     print("Datasets ready.", flush=True)
 
 
+def _hellaswag_preprocess(text: str) -> str:
+    """
+    Standard HellaSwag text cleanup (lm-eval-harness): turn wikiHow "[title]"
+    markers into sentence breaks and strip remaining bracketed annotations.
+    """
+    import re as _re
+    text = text.strip()
+    text = text.replace(" [title]", ". ")
+    text = _re.sub(r"\[.*?\]", "", text)
+    text = text.replace("  ", " ")
+    return text
+
+
 def eval_hellaswag(ds, server: str, out: Path | None = None, verbose: bool = False) -> dict:
     """
-    Continuation scoring with length normalization: score each ending as a
-    completion of ctx, normalized by token count to remove length bias between
-    endings of unequal length.
+    Length-normalized continuation scoring with lm-eval-harness preprocessing.
+
+    Context = activity_label + ": " + ctx_a + " " + Ctx_b (with [title]/[xxx]
+    cleanup).  Without the activity_label prefix the model loses the framing
+    that tells it what scenario the endings are continuing.
+
+    Score each cleaned ending as log P(ending | context) divided by ending
+    token count, so endings of unequal length compete on per-token coherence.
     """
     correct = 0
     skipped = 0
@@ -402,8 +591,11 @@ def eval_hellaswag(ds, server: str, out: Path | None = None, verbose: bool = Fal
         print(f"  Resuming hellaswag: {n_processed}/{len(ds)} samples done.", flush=True)
 
     for row in ds.select(range(n_processed, len(ds))):
-        context = row["ctx"]
-        scores = [continuation_logprob(server, context, " " + e, normalize=True)
+        context = _hellaswag_preprocess(
+            row["activity_label"] + ": " + row["ctx_a"] + " " + row["ctx_b"].capitalize()
+        )
+        scores = [continuation_logprob(server, context, " " + _hellaswag_preprocess(e),
+                                       normalize=True)
                   for e in row["endings"]]
         if all(s == float("-inf") for s in scores):
             skipped += 1
