@@ -24,6 +24,8 @@ Usage:
 """
 
 import argparse
+import contextlib
+import io
 import json
 import platform
 import subprocess
@@ -777,11 +779,44 @@ def check_server(server: str) -> bool:
         return False
 
 
+def _make_emissions_tracker(out_dir: Path):
+    """
+    Build a CodeCarbon EmissionsTracker, or return None if codecarbon isn't
+    installed.  Mirrors metrics_tracker.py — silences codecarbon's chatty
+    logging and disables on-disk emissions.csv (we store kWh/CO2 inline in
+    the per-task accuracy JSON instead).
+    """
+    try:
+        import warnings as _warnings
+        with _warnings.catch_warnings():
+            _warnings.filterwarnings("ignore", category=FutureWarning)
+            from codecarbon import EmissionsTracker
+        import logging as _logging
+        _logging.getLogger("codecarbon").setLevel(_logging.CRITICAL)
+        return EmissionsTracker(
+            project_name="llama-eval-accuracy",
+            output_dir=str(out_dir),
+            log_level="error",
+            save_to_file=False,
+        )
+    except ImportError:
+        return None
+
+
 def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
              max_subjects: int | None = None, out: Path | None = None,
-             verbose: bool = False) -> dict:
+             verbose: bool = False, track_energy: bool = True) -> dict:
     t0 = time.time()
     print(f"\n{'='*60}\nTask: {task}  limit={limit}  few-shot={num_fewshot}\n{'='*60}")
+
+    tracker = None
+    if track_energy:
+        tracker = _make_emissions_tracker(out.parent if out else REPO_ROOT / "results")
+        if tracker is None:
+            print("  (codecarbon not installed — skipping energy tracking)", flush=True)
+    if tracker:
+        tracker.start()
+
     if task in ("arc_easy", "arc_challenge"):
         subset = "ARC-Easy" if task == "arc_easy" else "ARC-Challenge"
         ds = load_arc(subset, limit)
@@ -800,13 +835,34 @@ def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
                            verbose=verbose)
     else:
         raise ValueError(f"Unknown task: {task}")
+
+    energy_kwh = co2_kg = None
+    if tracker:
+        # codecarbon 2.7 has a Windows lock-file bug that spams stderr on stop().
+        with contextlib.redirect_stderr(io.StringIO()):
+            emissions = tracker.stop()
+        co2_kg = float(emissions) if emissions is not None else None
+        try:
+            energy_kwh = tracker.final_emissions_data.energy_consumed
+        except Exception:
+            energy_kwh = None
+
     elapsed = time.time() - t0
     result["elapsed_s"] = round(elapsed, 1)
+    # energy_kwh / co2_kg cover this invocation only — checkpoint-resumed runs
+    # do not retain energy from the prior run, mirroring how elapsed_s behaves.
+    if energy_kwh is not None:
+        result["energy_kwh"] = round(energy_kwh, 6)
+    if co2_kg is not None:
+        result["co2_kg"] = round(co2_kg, 6)
     result["paper_target"] = PAPER_TARGETS.get(task)
     gap = result["accuracy"] - result["paper_target"] if result["paper_target"] else None
     gap_str = f"  (paper: {result['paper_target']}%,  gap: {gap:+.1f}%)" if gap is not None else ""
     print(f"\nResult: {result['accuracy']}%  ({result['correct']}/{result['total']}){gap_str}")
-    print(f"Time:   {elapsed:.0f}s")
+    print(f"Time:   {elapsed:.0f}s", end="")
+    if energy_kwh is not None:
+        print(f"   Energy: {energy_kwh*1000:.2f} Wh   CO2: {(co2_kg or 0)*1000:.2f} g", end="")
+    print()
     return result
 
 
@@ -828,6 +884,8 @@ def main():
     parser.add_argument("--llama-dir", type=Path, default=DEFAULT_LLAMA_DIR)
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--no-energy", action="store_true",
+                        help="Skip CodeCarbon energy tracking (faster, no internet needed)")
     args = parser.parse_args()
 
     port = int(args.server.split(":")[-1])
@@ -853,7 +911,8 @@ def main():
         fewshot = args.num_fewshot if task == "mmlu" else 0
         all_results[task] = run_task(task, args.server, fewshot, args.limit,
                                      max_subjects=args.max_subjects if task == "mmlu" else None,
-                                     out=args.out, verbose=args.verbose)
+                                     out=args.out, verbose=args.verbose,
+                                     track_energy=not args.no_energy)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     existing = {}

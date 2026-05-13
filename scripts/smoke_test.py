@@ -339,7 +339,8 @@ for _name, _server_bin, _model_path in _eval_configs:
                 [sys.executable, str(SCRIPTS / "eval_accuracy.py"),
                  "--task", task, "--limit", str(EVAL_LIMIT),
                  "--out", str(EVAL_SMOKE_OUT),
-                 "--server", EVAL_SERVER_URL, "--verbose", *extra],
+                 "--server", EVAL_SERVER_URL, "--verbose",
+                 "--no-energy", *extra],
                 stderr=subprocess.PIPE, text=True, cwd=ROOT,
                 timeout=EVAL_TIMEOUT,
             )
