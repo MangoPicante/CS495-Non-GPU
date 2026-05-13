@@ -38,12 +38,12 @@ An independent reproduction and extension of Microsoft's published inference ben
   - [x] Summarize the [BitNet b1.58 2B4T technical report (arXiv:2504.12285)](https://arxiv.org/abs/2504.12285)
   - [x] Document the absmean quantization function and Straight-Through Estimator in @BITNET_SUMMARY.md
   - [x] Document published FP16 baseline results (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B) to use as comparison targets
-- [ ] Create @QWEN_SUMMARY.md to describe the Qwen2.5-1.5B-Instruct baseline
-  - [ ] Summarize the Qwen2.5 model family and the 1.5B-Instruct variant's architecture and training
-  - [ ] Explain Q8_0 quantization and its expected accuracy vs FP16 trade-off
-  - [ ] Document published accuracy numbers for Qwen2.5 1.5B (ARC, HellaSwag, WinoGrande, MMLU)
-  - [ ] Explain why Qwen was chosen as the CPU baseline (size class, licensing, GGUF availability)
-  - [ ] Document the inference stack: upstream `llama.cpp` vs BitNet's fork, and key differences
+- [x] Create @QWEN_SUMMARY.md to describe the Qwen2.5-1.5B-Instruct baseline
+  - [x] Summarize the Qwen2.5 model family and the 1.5B-Instruct variant's architecture and training
+  - [x] Explain Q8_0 quantization and its expected accuracy vs FP16 trade-off
+  - [x] Document published accuracy numbers for Qwen2.5 1.5B (ARC, HellaSwag, WinoGrande, MMLU)
+  - [x] Explain why Qwen was chosen as the CPU baseline (size class, licensing, GGUF availability)
+  - [x] Document the inference stack: upstream `llama.cpp` vs BitNet's fork, and key differences
 
 ### Phase 2 — Environment Setup & Model Acquisition
 

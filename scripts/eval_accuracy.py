@@ -401,29 +401,44 @@ def load_arc(subset: str, limit: int | None):
 
 
 def eval_arc(ds, server: str, verbose: bool = False) -> dict:
-    letter_map = {"1": "A", "2": "B", "3": "C", "4": "D",
-                  "A": "A", "B": "B", "C": "C", "D": "D", "E": "E"}
+    """
+    Length-normalized loglikelihood scoring (lm-eval-harness acc_norm).
+
+    Prompt:    "Question: {question}\nAnswer:"
+    Candidates: each full choice text, prefixed with a space
+    Pick:      candidate with highest mean per-token logprob.
+
+    The earlier first-token letter scoring listed all choices in the
+    prompt and asked which letter came next; that lets the model use
+    in-prompt cross-option comparison and rewards format familiarity
+    rather than content understanding, inflating ARC-Challenge ~19pt
+    above the paper.  This methodology matches what the paper reports.
+    """
     correct = 0
     skipped = 0
     for row in ds:
         choices_text = row["choices"]["text"]
         choices_label = row["choices"]["label"]
-        answer_letter = letter_map.get(row["answerKey"], row["answerKey"])
-        letters = ["A", "B", "C", "D", "E"][:len(choices_text)]
-        opt_lines = "\n".join(f"{l}. {t}" for l, t in zip(letters, choices_text))
-        context = f"Question: {row['question']}\n{opt_lines}\nAnswer:"
-        scores = [(l, first_token_logprob(server, context, " " + l)) for l in letters]
-        if all(s == float("-inf") for _, s in scores):
+        try:
+            answer_idx = choices_label.index(row["answerKey"])
+        except ValueError:
             skipped += 1
             continue
-        predicted = max(scores, key=lambda x: x[1])[0]
+        context = f"Question: {row['question']}\nAnswer:"
+        scores = [continuation_logprob(server, context, " " + ct, normalize=True)
+                  for ct in choices_text]
+        if all(s == float("-inf") for s in scores):
+            skipped += 1
+            continue
+        pred_idx = scores.index(max(scores))
         if verbose:
             print(f"  Question: {row['question']}")
-            for l, t in zip(letters, choices_text):
-                print(f"    {l}. {t}")
-            print(f"  Expected: {answer_letter}  Predicted: {predicted}  "
-                  f"{'CORRECT' if predicted == answer_letter else 'WRONG'}")
-        if predicted == answer_letter:
+            for i, t in enumerate(choices_text):
+                marker = "  <- expected" if i == answer_idx else ""
+                print(f"    [{i}] {t}{marker}")
+            print(f"  Predicted: [{pred_idx}]  "
+                  f"{'CORRECT' if pred_idx == answer_idx else 'WRONG'}")
+        if pred_idx == answer_idx:
             correct += 1
     n = len(ds) - skipped
     return {"accuracy": round(correct / n * 100, 2) if n else 0.0,
@@ -655,6 +670,23 @@ ANSWER_CHOICES = ["A", "B", "C", "D"]
 
 
 def make_mmlu_fewshot_prompt(dev_rows, subject_name: str) -> str:
+    """
+    Build the 5-shot prompt prefix in lm-eval-harness MMLU format:
+
+        The following are multiple choice questions (with answers) about {subject}.
+
+        {q1}
+        A. ...
+        B. ...
+        C. ...
+        D. ...
+        Answer: {a1}
+
+        ...
+
+    Note: question is rendered as raw text (no "Question:" prefix), matching
+    lm-eval-harness's mmlu.doc_to_text.
+    """
     pretty = subject_name.replace("_", " ")
     header = f"The following are multiple choice questions (with answers) about {pretty}.\n\n"
     shots = []
@@ -662,7 +694,7 @@ def make_mmlu_fewshot_prompt(dev_rows, subject_name: str) -> str:
         opts = row["choices"]
         ans = ANSWER_CHOICES[row["answer"]]
         opt_str = "\n".join(f"{l}. {t}" for l, t in zip(ANSWER_CHOICES, opts))
-        shots.append(f"Question: {row['question']}\n{opt_str}\nAnswer: {ans}")
+        shots.append(f"{row['question'].strip()}\n{opt_str}\nAnswer: {ans}")
     return header + "\n\n".join(shots) + "\n\n"
 
 
@@ -684,7 +716,7 @@ def eval_mmlu_subject(subject: str, server: str, num_fewshot: int, limit: int | 
     for row in test_ds:
         opts = row["choices"]
         opt_str = "\n".join(f"{l}. {t}" for l, t in zip(ANSWER_CHOICES, opts))
-        context = fewshot_prefix + f"Question: {row['question']}\n{opt_str}\nAnswer:"
+        context = fewshot_prefix + f"{row['question'].strip()}\n{opt_str}\nAnswer:"
         scores = [first_token_logprob(server, context, " " + ch) for ch in ANSWER_CHOICES]
         if all(s == float("-inf") for s in scores):
             skipped += 1
