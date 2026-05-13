@@ -35,7 +35,7 @@ from pathlib import Path
 import requests
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "results" / "accuracy_results.json"
+DEFAULT_OUT = REPO_ROOT / "results" / "accuracy_results_bitnet.json"
 DEFAULT_LLAMA_DIR = REPO_ROOT.parent / "Models" / "BitNet"
 DEFAULT_MODEL = DEFAULT_LLAMA_DIR / "models" / "BitNet-b1.58-2B-4T" / "ggml-model-i2_s.gguf"
 
@@ -101,14 +101,43 @@ def ensure_server(server_url: str) -> bool:
 
 TASKS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
 
-# Published paper targets from arXiv:2504.12285 Table 1
-PAPER_TARGETS = {
-    "arc_easy":      74.79,
-    "arc_challenge": 49.91,
-    "winogrande":    71.90,
-    "hellaswag":     68.44,
-    "mmlu":          53.17,
+# Published paper targets from arXiv:2504.12285 Table 1.
+# BitNet entries are the b1.58 2B4T numbers; Qwen entries are the Qwen2.5 1.5B
+# FP16 numbers (compared against our Q8_0 measurement, which typically matches
+# FP16 within ~0.5pt on these benchmarks).
+PAPER_TARGETS_BY_MODEL = {
+    "bitnet": {
+        "arc_easy":      74.79,
+        "arc_challenge": 49.91,
+        "winogrande":    71.90,
+        "hellaswag":     68.44,
+        "mmlu":          53.17,
+    },
+    "qwen": {
+        "arc_easy":      79.92,
+        "arc_challenge": 52.82,
+        "winogrande":    66.61,
+        "hellaswag":     70.95,
+        "mmlu":          61.11,
+    },
 }
+
+
+def resolve_paper_targets(choice: str, model_path: Path) -> dict:
+    """
+    Pick which model's paper numbers to compare against.
+
+    choice="auto" infers from the model path ("qwen" in name → qwen, else bitnet);
+    "none" disables comparison entirely (gap text and JSON paper_target are skipped);
+    explicit "bitnet"/"qwen" override detection.
+    """
+    if choice == "none":
+        return {}
+    if choice == "auto":
+        if "qwen" in str(model_path).lower():
+            return PAPER_TARGETS_BY_MODEL["qwen"]
+        return PAPER_TARGETS_BY_MODEL["bitnet"]
+    return PAPER_TARGETS_BY_MODEL[choice]
 
 
 # ---------------------------------------------------------------------------
@@ -837,7 +866,8 @@ def _make_emissions_tracker(out_dir: Path):
 
 def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
              max_subjects: int | None = None, out: Path | None = None,
-             verbose: bool = False, track_energy: bool = True) -> dict:
+             verbose: bool = False, track_energy: bool = True,
+             paper_targets: dict | None = None) -> dict:
     t0 = time.time()
     print(f"\n{'='*60}\nTask: {task}  limit={limit}  few-shot={num_fewshot}\n{'='*60}")
 
@@ -887,9 +917,11 @@ def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
         result["energy_kwh"] = round(energy_kwh, 6)
     if co2_kg is not None:
         result["co2_kg"] = round(co2_kg, 6)
-    result["paper_target"] = PAPER_TARGETS.get(task)
-    gap = result["accuracy"] - result["paper_target"] if result["paper_target"] else None
-    gap_str = f"  (paper: {result['paper_target']}%,  gap: {gap:+.1f}%)" if gap is not None else ""
+    target = (paper_targets or {}).get(task)
+    if target is not None:
+        result["paper_target"] = target
+    gap = result["accuracy"] - target if target is not None else None
+    gap_str = f"  (paper: {target}%,  gap: {gap:+.1f}%)" if gap is not None else ""
     print(f"\nResult: {result['accuracy']}%  ({result['correct']}/{result['total']}){gap_str}")
     print(f"Time:   {elapsed:.0f}s", end="")
     if energy_kwh is not None:
@@ -918,7 +950,13 @@ def main():
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--no-energy", action="store_true",
                         help="Skip CodeCarbon energy tracking (faster, no internet needed)")
+    parser.add_argument("--paper-targets", choices=["auto", "bitnet", "qwen", "none"],
+                        default="auto",
+                        help="Which model's paper numbers to report gap against "
+                             "(default: auto — detect from --model path)")
     args = parser.parse_args()
+
+    paper_targets = resolve_paper_targets(args.paper_targets, args.model)
 
     port = int(args.server.split(":")[-1])
     tasks = TASKS if args.task == "all" else [args.task]
@@ -944,7 +982,8 @@ def main():
         all_results[task] = run_task(task, args.server, fewshot, args.limit,
                                      max_subjects=args.max_subjects if task == "mmlu" else None,
                                      out=args.out, verbose=args.verbose,
-                                     track_energy=not args.no_energy)
+                                     track_energy=not args.no_energy,
+                                     paper_targets=paper_targets)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     existing = {}

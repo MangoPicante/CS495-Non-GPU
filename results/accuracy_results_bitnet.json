@@ -1,0 +1,73 @@
+{
+  "mmlu": {
+    "accuracy": 53.0,
+    "correct": 53,
+    "total": 100,
+    "subjects": {
+      "abstract_algebra": {
+        "accuracy": 30.0,
+        "correct": 6,
+        "total": 20,
+        "skipped": 0
+      },
+      "anatomy": {
+        "accuracy": 45.0,
+        "correct": 9,
+        "total": 20,
+        "skipped": 0
+      },
+      "astronomy": {
+        "accuracy": 60.0,
+        "correct": 12,
+        "total": 20,
+        "skipped": 0
+      },
+      "business_ethics": {
+        "accuracy": 65.0,
+        "correct": 13,
+        "total": 20,
+        "skipped": 0
+      },
+      "clinical_knowledge": {
+        "accuracy": 65.0,
+        "correct": 13,
+        "total": 20,
+        "skipped": 0
+      }
+    },
+    "elapsed_s": 93.0,
+    "paper_target": 53.17
+  },
+  "arc_easy": {
+    "accuracy": 70.0,
+    "correct": 14,
+    "total": 20,
+    "skipped": 0,
+    "elapsed_s": 60.5,
+    "paper_target": 74.79
+  },
+  "arc_challenge": {
+    "accuracy": 70.0,
+    "correct": 14,
+    "total": 20,
+    "skipped": 0,
+    "elapsed_s": 81.3,
+    "paper_target": 49.91
+  },
+  "winogrande": {
+    "accuracy": 70.0,
+    "correct": 14,
+    "total": 20,
+    "skipped": 0,
+    "elapsed_s": 38.5,
+    "paper_target": 71.9
+  },
+  "hellaswag": {
+    "accuracy": 45.0,
+    "correct": 9,
+    "total": 20,
+    "skipped": 0,
+    "elapsed_s": 150.2,
+    "paper_target": 68.44
+  }
+}

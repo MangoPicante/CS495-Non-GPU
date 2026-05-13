@@ -265,7 +265,8 @@ benchmark-qwen:
 
 benchmark: benchmark-bitnet benchmark-qwen
 
-QWEN_ACC_OUT ?= results/qwen_accuracy_results.json
+BITNET_ACC_OUT ?= results/accuracy_results_bitnet.json
+QWEN_ACC_OUT   ?= results/accuracy_results_qwen.json
 
 eval-arc-easy-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
