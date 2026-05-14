@@ -248,7 +248,7 @@ bitnet-verify:
 		-n 32 \
 		-t $(THREADS)
 
-QWEN_BENCH_OUT ?= results/qwen_metrics.csv
+QWEN_BENCH_OUT ?= results/qwen_step_metrics.csv
 
 benchmark-bitnet:
 	$(POETRY) run python scripts/metrics_tracker.py \

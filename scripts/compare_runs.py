@@ -5,8 +5,8 @@ Reads local benchmark CSVs and accuracy JSONs, overlays published FP16 baseline
 numbers from arXiv:2504.12285 Table 1, and saves plots to results/plots/ plus a
 summary CSV to --csv (default: results/comparison_table.csv).
 
-  BitNet:  results/step_metrics.csv  +  results/accuracy_results_bitnet.json
-  Qwen:    results/qwen_metrics.csv  +  results/accuracy_results_qwen.json  (optional)
+  BitNet:  results/bitnet_step_metrics.csv  +  results/accuracy_results_bitnet.json
+  Qwen:    results/qwen_step_metrics.csv    +  results/accuracy_results_qwen.json  (optional)
 
 Hardware rate default: AWS c5.xlarge on-demand, us-east-1 ($0.170/hr, 4 vCPUs).
 On-demand pricing is used rather than spot for reproducibility — spot prices
@@ -15,9 +15,9 @@ Override with --hardware-rate if running on different hardware.
 
 Usage:
     python scripts/compare_runs.py
-        [--results results/step_metrics.csv]
+        [--results results/bitnet_step_metrics.csv]
         [--accuracy results/accuracy_results_bitnet.json]
-        [--qwen-results results/qwen_metrics.csv]
+        [--qwen-results results/qwen_step_metrics.csv]
         [--qwen-accuracy results/accuracy_results_qwen.json]
         [--csv results/comparison_table.csv]
         [--hardware-rate 0.170]
@@ -32,10 +32,10 @@ import numpy as np
 import pandas as pd
 
 PLOTS_DIR = Path(__file__).parent.parent / "results" / "plots"
-DEFAULT_CSV = Path(__file__).parent.parent / "results" / "step_metrics.csv"
+DEFAULT_CSV = Path(__file__).parent.parent / "results" / "bitnet_step_metrics.csv"
 DEFAULT_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_bitnet.json"
 DEFAULT_COMPARISON_CSV = Path(__file__).parent.parent / "results" / "comparison_table.csv"
-DEFAULT_QWEN_CSV = Path(__file__).parent.parent / "results" / "qwen_metrics.csv"
+DEFAULT_QWEN_CSV = Path(__file__).parent.parent / "results" / "qwen_step_metrics.csv"
 DEFAULT_QWEN_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen.json"
 
 # AWS c5.xlarge on-demand, us-east-1 (4 vCPUs — matches 4-thread benchmark condition)
@@ -113,12 +113,23 @@ def parse_args():
 
 def load_local(csv_path: Path) -> pd.DataFrame:
     if not csv_path.exists():
-        raise FileNotFoundError(f"No results found at {csv_path}. Run 'make benchmark' first.")
+        print(f"No benchmark results at {csv_path} — throughput/memory/energy plots "
+              f"will be skipped. Run 'make benchmark' to generate them.")
+        return pd.DataFrame()
     df = pd.read_csv(csv_path)
     df = df[df["throughput_tokens_s"].notna() & (df["throughput_tokens_s"] != "")]
     df["throughput_tokens_s"] = pd.to_numeric(df["throughput_tokens_s"])
     df["peak_rss_mb"] = pd.to_numeric(df["peak_rss_mb"])
     return df
+
+
+def _has_bench_data(df: pd.DataFrame | None) -> bool:
+    """True if df has at least one row matching the (512, 128) reference config."""
+    if df is None or df.empty:
+        return False
+    if "n_prompt" not in df.columns or "n_gen" not in df.columns:
+        return False
+    return not df[(df["n_prompt"] == 512) & (df["n_gen"] == 128)].empty
 
 
 def load_accuracy(json_path: Path) -> dict:
@@ -148,6 +159,8 @@ def load_qwen(csv_path: Path) -> pd.DataFrame | None:
 
 def _bench_row(df: pd.DataFrame) -> tuple[float | None, float | None]:
     """Return (median throughput, median peak_rss) for the n_prompt=512, n_gen=128 condition."""
+    if df is None or df.empty or "n_prompt" not in df.columns:
+        return None, None
     row = df[(df["n_prompt"] == 512) & (df["n_gen"] == 128)]
     tps = row["throughput_tokens_s"].median() if not row.empty else None
     rss = row["peak_rss_mb"].median() if not row.empty else None
@@ -208,9 +221,9 @@ def build_comparison_df(
         **{f: QWEN_PAPER[f] for f in ACC_FIELDS},
     })
 
-    if qwen_df is not None:
-        q_tps, q_rss = _bench_row(qwen_df)
-        q_acc = qwen_acc or {}
+    q_acc = qwen_acc or {}
+    if qwen_df is not None or any(q_acc.get(f) is not None for f in ACC_FIELDS):
+        q_tps, q_rss = _bench_row(qwen_df) if qwen_df is not None else (None, None)
         q_cost = round(cost_per_1k(q_tps, hardware_rate), 6) if q_tps else ""
         rows.append({
             "model": "Qwen2.5-1.5B-Instruct Q8_0",
@@ -242,23 +255,27 @@ def _bar_series(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None,
     bitnet_tps, bitnet_rss = _bench_row(local_df)
     bitnet_local = bitnet_tps if metric_col == "throughput_tokens_s" else bitnet_rss
 
-    labels = list(OTHER_BASELINES.keys()) + [
-        "BitNet b1.58 2B4T (paper)", "BitNet b1.58 2B4T (ours)",
-        "Qwen2.5 1.5B (paper FP16)",
-    ]
-    values = (
-        [OTHER_BASELINES[m][metric_col] for m in OTHER_BASELINES]
-        + [BITNET_PAPER[metric_col], bitnet_local if bitnet_local else 0,
-           QWEN_PAPER[metric_col]]
-    )
-    colors  = [OTHER_COLOR] * len(OTHER_BASELINES) + [BITNET_COLOR, BITNET_COLOR, QWEN_COLOR]
-    hatches = [""]          * len(OTHER_BASELINES) + ["///",        "",           "///"]
+    labels = list(OTHER_BASELINES.keys()) + ["BitNet b1.58 2B4T (paper)"]
+    values = [OTHER_BASELINES[m][metric_col] for m in OTHER_BASELINES] + [BITNET_PAPER[metric_col]]
+    colors  = [OTHER_COLOR] * len(OTHER_BASELINES) + [BITNET_COLOR]
+    hatches = [""]          * len(OTHER_BASELINES) + ["///"]
 
-    if qwen_df is not None:
-        q_tps, q_rss = _bench_row(qwen_df)
-        q_val = q_tps if metric_col == "throughput_tokens_s" else q_rss
+    if bitnet_local is not None:
+        labels.append("BitNet b1.58 2B4T (ours)")
+        values.append(bitnet_local)
+        colors.append(BITNET_COLOR)
+        hatches.append("")
+
+    labels.append("Qwen2.5 1.5B (paper FP16)")
+    values.append(QWEN_PAPER[metric_col])
+    colors.append(QWEN_COLOR)
+    hatches.append("///")
+
+    q_tps, q_rss = _bench_row(qwen_df) if qwen_df is not None else (None, None)
+    q_val = q_tps if metric_col == "throughput_tokens_s" else q_rss
+    if q_val is not None:
         labels.append("Qwen2.5-1.5B-Instruct Q8_0 (ours)")
-        values.append(q_val if q_val else 0)
+        values.append(q_val)
         colors.append(QWEN_COLOR)
         hatches.append("")
 
@@ -279,6 +296,9 @@ def _legend_handles(qwen_df: pd.DataFrame | None):
 
 
 def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | None = None):
+    if not _has_bench_data(local_df) and not _has_bench_data(qwen_df):
+        print("Skipping throughput plot: no benchmark CSVs (run 'make benchmark').")
+        return
     labels, values, colors, hatches = _bar_series(local_df, qwen_df, "throughput_tokens_s")
 
     fig, ax = plt.subplots(figsize=(10, max(5, len(labels) * 0.55)))
@@ -303,6 +323,9 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame
 
 
 def plot_memory(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | None = None):
+    if not _has_bench_data(local_df) and not _has_bench_data(qwen_df):
+        print("Skipping memory plot: no benchmark CSVs (run 'make benchmark').")
+        return
     labels, values, colors, hatches = _bar_series(local_df, qwen_df, "peak_rss_mb")
 
     fig, ax = plt.subplots(figsize=(10, max(5, len(labels) * 0.55)))
@@ -327,6 +350,9 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | N
 
 
 def plot_throughput_by_config(local_df: pd.DataFrame, out_dir: Path):
+    if local_df is None or local_df.empty:
+        print("Skipping BitNet throughput-by-config plot: no benchmark CSV.")
+        return
     configs = local_df.groupby(["n_prompt", "n_gen"])["throughput_tokens_s"].median().reset_index()
     labels = [f"p={int(row.n_prompt)} / g={int(row.n_gen)}" for _, row in configs.iterrows()]
 
@@ -442,10 +468,14 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
 
         ann_label = model.replace(" b1.58 2B4T", "").replace(" (FP16)", "").replace(" Q8_0", "")
         ann_label += " (ours)" if is_ours else " (paper)"
+        # Offset paper labels above-right and ours labels below-right so each
+        # model's paper/ours pair separates even when the points sit nearly
+        # on top of each other (e.g. BitNet ours ≈ BitNet paper on MMLU/cost).
+        xy_offset = (8, -10) if is_ours else (8, 6)
         ax.annotate(
             ann_label,
             (row["cost_per_1k_tokens"], row["mmlu"]),
-            textcoords="offset points", xytext=(8, 4), fontsize=8,
+            textcoords="offset points", xytext=xy_offset, fontsize=8,
         )
 
     # De-duplicate legend entries
@@ -468,58 +498,80 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
     print(f"Saved {path}")
 
 
-def plot_energy(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None, out_dir: Path):
+def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None, out_dir: Path):
     """
-    Energy per 1,000 tokens at the n_prompt=512, n_gen=128 workload, in Wh.
+    Two-panel energy + carbon footprint per 1,000 tokens at n_prompt=512, n_gen=128.
 
-    Wh/1k_tok = (energy_kwh × 1e6) / (n_prompt + n_gen).  Only BitNet and Qwen —
-    the FP16 papers don't report energy, so they're omitted rather than estimated.
-    Skips silently if neither metrics CSV has populated energy_kwh.
+      Left  panel: Wh per 1k tokens   = energy_kwh × 1e6 / (n_prompt + n_gen)
+      Right panel: gCO₂ per 1k tokens = co2_kg    × 1e6 / (n_prompt + n_gen)
+
+    Carbon depends on the local grid's intensity (codecarbon resolves this from
+    geolocation at run time), so the per-region figure noted in the title is
+    not a property of the model — it's a property of where the bench ran.
+
+    FP16 baselines aren't shown — the paper doesn't report energy/CO₂.  Skips
+    silently if neither metrics CSV has populated energy_kwh.
     """
-    def wh_per_1k(df: pd.DataFrame | None) -> float | None:
-        if df is None or "energy_kwh" not in df.columns:
+    def per_1k(df: pd.DataFrame | None, col: str, scale: float) -> float | None:
+        if df is None or col not in df.columns:
             return None
         row = df[(df["n_prompt"] == 512) & (df["n_gen"] == 128)].copy()
-        row["energy_kwh"] = pd.to_numeric(row["energy_kwh"], errors="coerce")
-        energies = row["energy_kwh"].dropna()
-        if energies.empty:
+        row[col] = pd.to_numeric(row[col], errors="coerce")
+        vals = row[col].dropna()
+        if vals.empty:
             return None
-        return float(energies.median() * 1_000_000 / (512 + 128))
+        return float(vals.median() * scale / (512 + 128))
 
-    bitnet_wh = wh_per_1k(local_df)
-    qwen_wh   = wh_per_1k(qwen_df)
+    # Wh = kWh × 1000;  g = kg × 1000.  Both × 1000 again to express "per 1k tokens".
+    bitnet_wh   = per_1k(local_df, "energy_kwh", 1_000_000)
+    qwen_wh     = per_1k(qwen_df,  "energy_kwh", 1_000_000)
+    bitnet_gco2 = per_1k(local_df, "co2_kg",     1_000_000)
+    qwen_gco2   = per_1k(qwen_df,  "co2_kg",     1_000_000)
+
     if bitnet_wh is None and qwen_wh is None:
-        print("Skipping energy plot: no energy_kwh data in benchmark CSVs.")
+        print("Skipping energy/carbon plot: no energy_kwh data in benchmark CSVs.")
         return
 
-    labels, values, colors = [], [], []
+    rows: list[tuple[str, str, float | None, float | None]] = []
     if bitnet_wh is not None:
-        labels.append("BitNet b1.58 2B4T (ours)")
-        values.append(bitnet_wh)
-        colors.append(BITNET_COLOR)
+        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2))
     if qwen_wh is not None:
-        labels.append("Qwen2.5-1.5B Q8_0 (ours)")
-        values.append(qwen_wh)
-        colors.append(QWEN_COLOR)
+        rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_COLOR, qwen_wh, qwen_gco2))
 
-    fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 1.1)))
-    max_val = max(values) or 1
-    for i, (val, color) in enumerate(zip(values, colors)):
-        ax.barh(i, val, color=color, edgecolor="#444444", linewidth=0.5)
-        ax.text(val + max_val * 0.01, i, f"{val:.2f} Wh", va="center", fontsize=10)
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels(labels)
-    ax.set_xlabel(
-        "Energy per 1,000 tokens (Wh)  —  measured via CodeCarbon at n_prompt=512, n_gen=128"
+    fig, (ax_e, ax_c) = plt.subplots(
+        1, 2, figsize=(13, max(3.5, len(rows) * 1.2)), sharey=True
     )
-    ax.set_title(
-        "Inference Energy: BitNet vs Qwen on CPU\n"
-        "(FP16 baselines omitted — paper does not report energy)"
+
+    def _draw_panel(ax, values: list[float | None], unit: str):
+        finite = [v for v in values if v is not None]
+        max_val = max(finite) if finite else 1
+        for i, val in enumerate(values):
+            if val is None:
+                ax.text(0, i, "  (no data)", va="center", fontsize=9, color="#888")
+                continue
+            ax.barh(i, val, color=rows[i][1], edgecolor="#444444", linewidth=0.5)
+            ax.text(val + max_val * 0.02, i, f"{val:.2f} {unit}",
+                    va="center", fontsize=10)
+        ax.set_xlim(0, max_val * 1.25)
+
+    ax_e.set_yticks(range(len(rows)))
+    ax_e.set_yticklabels([r[0] for r in rows])
+    ax_e.invert_yaxis()
+    _draw_panel(ax_e, [r[2] for r in rows], "Wh")
+    _draw_panel(ax_c, [r[3] for r in rows], "g")
+
+    ax_e.set_xlabel("Energy per 1,000 tokens (Wh)")
+    ax_c.set_xlabel("Carbon emissions per 1,000 tokens (g CO₂)")
+    ax_e.set_title("Energy")
+    ax_c.set_title("Carbon")
+
+    fig.suptitle(
+        "Inference Energy & Carbon Footprint per 1,000 tokens\n"
+        "(BitNet vs Qwen on CPU at n_prompt=512, n_gen=128; CO₂ uses local grid intensity from CodeCarbon)",
+        fontsize=11,
     )
-    ax.set_xlim(0, max_val * 1.2)
-    ax.invert_yaxis()
-    fig.tight_layout()
-    path = out_dir / "energy_per_1k_tokens.png"
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    path = out_dir / "energy_carbon_comparison.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"Saved {path}")
@@ -599,8 +651,9 @@ def plot_memory_accuracy(comparison_df: pd.DataFrame, out_dir: Path):
 
         ann = model.replace(" b1.58 2B4T", "").replace(" (FP16)", "").replace(" Q8_0", "")
         ann += " (ours)" if is_ours else " (paper)"
+        xy_offset = (8, -10) if is_ours else (8, 6)
         ax.annotate(ann, (row["peak_rss_mb"], row["mean_acc"]),
-                    textcoords="offset points", xytext=(8, 4), fontsize=8)
+                    textcoords="offset points", xytext=xy_offset, fontsize=8)
 
     handles, labels_list = ax.get_legend_handles_labels()
     seen: dict = {}
@@ -626,7 +679,7 @@ def main():
     local_df = load_local(Path(args.results))
     local_acc = load_accuracy(Path(args.accuracy))
     qwen_df = load_qwen(Path(args.qwen_results))
-    qwen_acc = load_accuracy(Path(args.qwen_accuracy)) if qwen_df is not None else None
+    qwen_acc = load_accuracy(Path(args.qwen_accuracy))
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     comparison_df = build_comparison_df(local_df, local_acc, args.hardware_rate, qwen_df, qwen_acc)
@@ -637,7 +690,7 @@ def main():
     plot_throughput_by_config(local_df, PLOTS_DIR)
     plot_accuracy(local_acc, PLOTS_DIR, qwen_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
-    plot_energy(local_df, qwen_df, PLOTS_DIR)
+    plot_energy_carbon(local_df, qwen_df, PLOTS_DIR)
     plot_memory_accuracy(comparison_df, PLOTS_DIR)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")

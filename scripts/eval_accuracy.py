@@ -29,6 +29,7 @@ import io
 import json
 import platform
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -840,6 +841,21 @@ def check_server(server: str) -> bool:
         return False
 
 
+def _clear_stale_codecarbon_lock() -> None:
+    """
+    Remove any leftover %TEMP%/.codecarbon.lock from an abnormally terminated
+    prior run.  Without this, codecarbon refuses to start (treating the stale
+    lock as a concurrent instance) and silently returns None from stop(),
+    zeroing the energy_kwh/co2_kg fields without surfacing an error.
+    """
+    lock = Path(tempfile.gettempdir()) / ".codecarbon.lock"
+    if lock.exists():
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+
+
 def _make_emissions_tracker(out_dir: Path):
     """
     Build a CodeCarbon EmissionsTracker, or return None if codecarbon isn't
@@ -847,6 +863,7 @@ def _make_emissions_tracker(out_dir: Path):
     logging and disables on-disk emissions.csv (we store kWh/CO2 inline in
     the per-task accuracy JSON instead).
     """
+    _clear_stale_codecarbon_lock()
     try:
         import warnings as _warnings
         with _warnings.catch_warnings():

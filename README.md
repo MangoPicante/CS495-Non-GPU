@@ -136,7 +136,7 @@ All scripts are run from the **repo root** (`CS495-Non-GPU/`).
 
 ### Inference latency & memory benchmark
 
-Records latency, throughput, peak RSS, and energy to `results/step_metrics.csv`:
+Records latency, throughput, peak RSS, and energy to `results/bitnet_step_metrics.csv` (BitNet default) or `results/qwen_step_metrics.csv` when run against Qwen:
 
 ```bash
 python scripts/metrics_tracker.py --threads 4 --n-tokens 128 --tag "baseline"
@@ -150,7 +150,7 @@ Key options:
 | `--n-tokens` | 128 | Tokens to generate |
 | `--tag` | `""` | Label stored in CSV |
 | `--no-energy` | off | Skip CodeCarbon measurement |
-| `--out` | `results/step_metrics.csv` | Output file |
+| `--out` | `results/bitnet_step_metrics.csv` | Output file |
 
 ### Accuracy evaluation (lm-evaluation-harness)
 
@@ -176,12 +176,13 @@ Results are saved as JSON to `results/lm_eval/`.
 ```
 CS495-Non-GPU/
 ├── scripts/
-│   ├── metrics_tracker.py   # Inference latency / memory / energy → step_metrics.csv
+│   ├── metrics_tracker.py   # Inference latency / memory / energy → bitnet_step_metrics.csv
 │   ├── run_lm_eval.py       # lm-eval harness wrapper (manages llama-server lifecycle)
 │   └── compare_runs.py      # (Phase 4) Generate comparison plots
 │
 ├── results/
-│   ├── step_metrics.csv     # Per-run inference benchmark results
+│   ├── bitnet_step_metrics.csv  # Per-run inference benchmark results (BitNet)
+│   ├── qwen_step_metrics.csv    # Per-run inference benchmark results (Qwen)
 │   ├── lm_eval/             # lm-evaluation-harness JSON outputs
 │   └── comparison_table.csv # (Phase 4) Aggregated comparison table
 │

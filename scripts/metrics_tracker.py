@@ -4,7 +4,7 @@ Benchmark runner for llama.cpp-based models (BitNet, Qwen, etc.).
 Invokes llama-bench with a fixed set of prompt/generation sizes, captures
 per-run JSON output, measures peak RSS via psutil, and tracks energy and
 CO2 via CodeCarbon (enabled by default; skip with --no-energy).  Results
-are appended to the output CSV (default: results/step_metrics.csv).
+are appended to the output CSV (default: results/bitnet_step_metrics.csv).
 
 Usage:
     # BitNet
@@ -17,7 +17,7 @@ Usage:
     python scripts/metrics_tracker.py \
         --llama-dir ../Models/Qwen/llama.cpp \
         --model ../Models/Qwen/qwen2.5-1.5b-instruct-q8_0.gguf \
-        --out results/qwen_metrics.csv \
+        --out results/qwen_step_metrics.csv \
         --threads 4
 """
 
@@ -35,9 +35,29 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 
+import tempfile
+
 import psutil
 
-DEFAULT_OUT = Path(__file__).parent.parent / "results" / "step_metrics.csv"
+DEFAULT_OUT = Path(__file__).parent.parent / "results" / "bitnet_step_metrics.csv"
+
+
+def clear_stale_codecarbon_lock() -> None:
+    """
+    Remove any leftover %TEMP%/.codecarbon.lock.
+
+    codecarbon 2.7 creates a process-wide lock and refuses to start a tracker
+    if it already exists. Abnormal termination (process kill, Ctrl-C, crash)
+    leaves the lock behind — every subsequent run then silently returns None
+    from stop(), zeroing energy_kwh / co2_kg without surfacing an error.
+    We run one tracker at a time, so any pre-existing lock is stale.
+    """
+    lock = Path(tempfile.gettempdir()) / ".codecarbon.lock"
+    if lock.exists():
+        try:
+            lock.unlink()
+        except OSError:
+            pass
 
 CSV_FIELDS = [
     "timestamp",
@@ -171,6 +191,7 @@ def main():
 
     tracker = None
     if not args.no_energy:
+        clear_stale_codecarbon_lock()
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=FutureWarning)
