@@ -35,6 +35,9 @@ emissions.csv
 # Smoke test scratch output (regenerated on every run)
 results/smoke_accuracy.json
 
+# Transient benchmark log
+results/_bench.log
+
 # IDE
 .vscode/
 .idea/
