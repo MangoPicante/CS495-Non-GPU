@@ -93,6 +93,15 @@ OTHER_COLOR  = "#4C72B0"
 BITNET_COLOR = "#DD8452"
 QWEN_COLOR   = "#55A868"
 
+# Display names for the five accuracy tasks (used in per-task plot titles/labels)
+TASK_LABELS = {
+    "arc_easy":      "ARC-Easy",
+    "arc_challenge": "ARC-Challenge",
+    "winogrande":    "WinoGrande",
+    "hellaswag":     "HellaSwag",
+    "mmlu":          "MMLU",
+}
+
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -349,19 +358,20 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | N
     print(f"Saved {path}")
 
 
-def plot_throughput_by_config(local_df: pd.DataFrame, out_dir: Path):
-    if local_df is None or local_df.empty:
-        print("Skipping BitNet throughput-by-config plot: no benchmark CSV.")
+def plot_throughput_by_config(df: pd.DataFrame, out_dir: Path,
+                              model_name: str, color: str, filename: str):
+    if df is None or df.empty:
+        print(f"Skipping {filename}: no benchmark CSV.")
         return
-    configs = local_df.groupby(["n_prompt", "n_gen"])["throughput_tokens_s"].median().reset_index()
+    configs = df.groupby(["n_prompt", "n_gen"])["throughput_tokens_s"].median().reset_index()
     labels = [f"p={int(row.n_prompt)} / g={int(row.n_gen)}" for _, row in configs.iterrows()]
 
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(labels, configs["throughput_tokens_s"], color="#DD8452")
+    ax.bar(labels, configs["throughput_tokens_s"], color=color)
     ax.set_ylabel("Throughput (tokens/s)")
-    ax.set_title("BitNet b1.58 2B4T Throughput by Prompt/Generation Length")
+    ax.set_title(f"{model_name} Throughput by Prompt/Generation Length")
     fig.tight_layout()
-    path = out_dir / "bitnet_throughput_configs.png"
+    path = out_dir / filename
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"Saved {path}")
@@ -412,15 +422,49 @@ def plot_accuracy(local_acc: dict, out_dir: Path, qwen_acc: dict | None = None):
     print(f"Saved {path}")
 
 
-def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
-    # Use MMLU as the accuracy axis — most general benchmark, reported by all models.
-    # Hollow circles = paper-reported numbers; filled diamonds = our local measurements.
-    # A dotted connector between each model's (paper, ours) pair makes the
-    # paper-to-measurement delta visible at a glance.
-    plot_df = df[df["cost_per_1k_tokens"].notna() & (df["cost_per_1k_tokens"] != "")].copy()
-    plot_df = plot_df[plot_df["mmlu"].notna() & (plot_df["mmlu"] != "")].copy()
-    plot_df["cost_per_1k_tokens"] = pd.to_numeric(plot_df["cost_per_1k_tokens"])
-    plot_df["mmlu"] = pd.to_numeric(plot_df["mmlu"])
+def _accuracy_scatter(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    x_col: str,
+    y_metric: str,        # one of TASK_LABELS keys, or the special value "mean_acc"
+    x_label: str,
+    y_label: str,
+    title: str,
+    filename: str,
+    legend_loc: str = "best",
+) -> None:
+    """
+    Shared scatter for both cost–accuracy and memory–accuracy comparisons.
+
+    Hollow circles = paper-reported numbers; filled diamonds = our local
+    measurements.  A dotted connector between each model's (paper, ours) pair
+    makes the paper-to-measurement delta visible at a glance.
+
+    `y_metric` selects the accuracy axis: either a task column name (e.g.
+    "mmlu") or "mean_acc" — the mean across the five tasks in TASK_LABELS.
+    """
+    plot_df = df[df[x_col].notna() & (df[x_col] != "")].copy()
+    plot_df[x_col] = pd.to_numeric(plot_df[x_col])
+
+    if y_metric == "mean_acc":
+        def _mean(row):
+            vals = []
+            for f in TASK_LABELS:
+                v = row[f]
+                if v == "" or pd.isna(v):
+                    return None
+                vals.append(float(v))
+            return sum(vals) / len(vals)
+        plot_df["_y"] = plot_df.apply(_mean, axis=1)
+    else:
+        plot_df = plot_df[plot_df[y_metric].notna() & (plot_df[y_metric] != "")].copy()
+        plot_df["_y"] = pd.to_numeric(plot_df[y_metric], errors="coerce")
+
+    plot_df = plot_df[plot_df["_y"].notna()]
+    if plot_df.empty:
+        print(f"Skipping {filename}: no rows with {x_col} + {y_metric} data.")
+        return
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -429,7 +473,7 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
     BITNET_NAME     = "BitNet b1.58 2B4T"
 
     by_key = {
-        (row["model"], row["source"]): (row["cost_per_1k_tokens"], row["mmlu"])
+        (row["model"], row["source"]): (row[x_col], row["_y"])
         for _, row in plot_df.iterrows()
     }
     for ours_key, paper_key, color in [
@@ -453,49 +497,69 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
         elif source == "paper":
             color, label = BITNET_COLOR, "BitNet b1.58 2B4T (paper)"
         elif is_qwen_ours:
-            color, label = QWEN_COLOR, "Qwen2.5-1.5B Q8_0 (ours, 0-shot MMLU)"
+            color, label = QWEN_COLOR, "Qwen2.5-1.5B Q8_0 (ours)"
         else:
-            color, label = BITNET_COLOR, "BitNet b1.58 2B4T (ours, 0-shot MMLU)"
+            color, label = BITNET_COLOR, "BitNet b1.58 2B4T (ours)"
 
         if is_ours:
-            ax.scatter(row["cost_per_1k_tokens"], row["mmlu"],
+            ax.scatter(row[x_col], row["_y"],
                        facecolors=color, edgecolors=color, marker="D",
                        s=160, linewidths=1.5, label=label, zorder=3)
         else:
-            ax.scatter(row["cost_per_1k_tokens"], row["mmlu"],
+            ax.scatter(row[x_col], row["_y"],
                        facecolors="white", edgecolors=color, marker="o",
                        s=110, linewidths=2, label=label, zorder=3)
 
-        ann_label = model.replace(" b1.58 2B4T", "").replace(" (FP16)", "").replace(" Q8_0", "")
-        ann_label += " (ours)" if is_ours else " (paper)"
+        ann = model.replace(" b1.58 2B4T", "").replace(" (FP16)", "").replace(" Q8_0", "")
+        ann += " (ours)" if is_ours else " (paper)"
         # Offset paper labels above-right and ours labels below-right so each
-        # model's paper/ours pair separates even when the points sit nearly
-        # on top of each other (e.g. BitNet ours ≈ BitNet paper on MMLU/cost).
+        # model's paper/ours pair separates even when the points sit nearly on
+        # top of each other (e.g. BitNet ours ≈ BitNet paper on MMLU/cost).
         xy_offset = (8, -10) if is_ours else (8, 6)
-        ax.annotate(
-            ann_label,
-            (row["cost_per_1k_tokens"], row["mmlu"]),
-            textcoords="offset points", xytext=xy_offset, fontsize=8,
-        )
+        ax.annotate(ann, (row[x_col], row["_y"]),
+                    textcoords="offset points", xytext=xy_offset, fontsize=8)
 
-    # De-duplicate legend entries
     handles, labels_list = ax.get_legend_handles_labels()
     seen: dict = {}
     for h, l in zip(handles, labels_list):
         if l and l not in seen:
             seen[l] = h
-    ax.legend(seen.values(), seen.keys(), fontsize=9)
+    ax.legend(seen.values(), seen.keys(), fontsize=9, loc=legend_loc)
 
-    ax.set_xlabel(f"Cost per 1,000 tokens (USD, c5.xlarge @ ${hardware_rate:.3f}/hr)")
-    ax.set_ylabel("MMLU Accuracy (%)")
-    ax.set_title("Cost–Accuracy Trade-off: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
-                 "(hollow ○ = paper target,  filled ♦ = our measurement)")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    path = out_dir / "cost_accuracy.png"
+    path = out_dir / filename
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"Saved {path}")
+
+
+def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
+    """Cost vs accuracy: mean-of-5 plot plus one plot per task."""
+    x_label = f"Cost per 1,000 tokens (USD, c5.xlarge @ ${hardware_rate:.3f}/hr)"
+    _accuracy_scatter(
+        df, out_dir,
+        x_col="cost_per_1k_tokens", y_metric="mean_acc",
+        x_label=x_label,
+        y_label="Mean accuracy across 5 benchmarks (%)",
+        title="Cost–Accuracy Trade-off: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
+              "(mean of ARC-Easy, ARC-Challenge, WinoGrande, HellaSwag, MMLU;  "
+              "hollow ○ = paper,  filled ♦ = ours)",
+        filename="cost_accuracy.png",
+    )
+    for task, task_label in TASK_LABELS.items():
+        _accuracy_scatter(
+            df, out_dir,
+            x_col="cost_per_1k_tokens", y_metric=task,
+            x_label=x_label,
+            y_label=f"{task_label} Accuracy (%)",
+            title=f"Cost–{task_label} Trade-off: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
+                  f"(hollow ○ = paper target,  filled ♦ = our measurement)",
+            filename=f"{task}_cost_accuracy.png",
+        )
 
 
 def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None, out_dir: Path):
@@ -577,101 +641,35 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None, out
     print(f"Saved {path}")
 
 
-def plot_memory_accuracy(comparison_df: pd.DataFrame, out_dir: Path):
+def plot_memory_accuracy(df: pd.DataFrame, out_dir: Path):
     """
-    Memory–accuracy Pareto frontier: peak_rss_mb on x, mean-of-5-task accuracy on y.
+    Memory vs accuracy: mean-of-5 Pareto plot plus one plot per task.
 
     Lower-left is more efficient (less memory per accuracy point); BitNet b1.58
     typically sits in a corner the FP16 baselines can't reach.  Same hollow-vs-
     filled marker convention as plot_cost_accuracy.
     """
-    ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
-    df = comparison_df.copy()
-    df = df[df["peak_rss_mb"].notna() & (df["peak_rss_mb"] != "")].copy()
-    df["peak_rss_mb"] = pd.to_numeric(df["peak_rss_mb"])
-
-    def mean_acc(row) -> float | None:
-        vals = []
-        for f in ACC_FIELDS:
-            v = row[f]
-            if v == "" or pd.isna(v):
-                return None
-            vals.append(float(v))
-        return sum(vals) / len(vals)
-
-    df["mean_acc"] = df.apply(mean_acc, axis=1)
-    df = df[df["mean_acc"].notna()]
-    if df.empty:
-        print("Skipping memory–accuracy plot: no rows with full accuracy + memory data.")
-        return
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    QWEN_OURS_NAME  = "Qwen2.5-1.5B-Instruct Q8_0"
-    QWEN_PAPER_NAME = "Qwen2.5 1.5B"
-    BITNET_NAME     = "BitNet b1.58 2B4T"
-
-    by_key = {
-        (row["model"], row["source"]): (row["peak_rss_mb"], row["mean_acc"])
-        for _, row in df.iterrows()
-    }
-    for ours_key, paper_key, color in [
-        ((BITNET_NAME, "ours"),    (BITNET_NAME, "paper"),           BITNET_COLOR),
-        ((QWEN_OURS_NAME, "ours"), (QWEN_PAPER_NAME, "paper (FP16)"), QWEN_COLOR),
-    ]:
-        if ours_key in by_key and paper_key in by_key:
-            x0, y0 = by_key[paper_key]
-            x1, y1 = by_key[ours_key]
-            ax.plot([x0, x1], [y0, y1], linestyle=":", color=color, alpha=0.55, zorder=2)
-
-    for _, row in df.iterrows():
-        source, model = row["source"], row["model"]
-        is_qwen_ours  = source == "ours" and model == QWEN_OURS_NAME
-        is_qwen_paper = source == "paper (FP16)" and model == QWEN_PAPER_NAME
-        is_ours = source == "ours"
-        if is_qwen_paper:
-            color, label = QWEN_COLOR, "Qwen2.5 1.5B (paper FP16)"
-        elif source == "paper (FP16)":
-            color, label = OTHER_COLOR, "Other FP16 baseline (paper)"
-        elif source == "paper":
-            color, label = BITNET_COLOR, "BitNet b1.58 2B4T (paper)"
-        elif is_qwen_ours:
-            color, label = QWEN_COLOR, "Qwen2.5-1.5B Q8_0 (ours)"
-        else:
-            color, label = BITNET_COLOR, "BitNet b1.58 2B4T (ours)"
-
-        if is_ours:
-            ax.scatter(row["peak_rss_mb"], row["mean_acc"],
-                       facecolors=color, edgecolors=color, marker="D",
-                       s=160, linewidths=1.5, label=label, zorder=3)
-        else:
-            ax.scatter(row["peak_rss_mb"], row["mean_acc"],
-                       facecolors="white", edgecolors=color, marker="o",
-                       s=110, linewidths=2, label=label, zorder=3)
-
-        ann = model.replace(" b1.58 2B4T", "").replace(" (FP16)", "").replace(" Q8_0", "")
-        ann += " (ours)" if is_ours else " (paper)"
-        xy_offset = (8, -10) if is_ours else (8, 6)
-        ax.annotate(ann, (row["peak_rss_mb"], row["mean_acc"]),
-                    textcoords="offset points", xytext=xy_offset, fontsize=8)
-
-    handles, labels_list = ax.get_legend_handles_labels()
-    seen: dict = {}
-    for h, l in zip(handles, labels_list):
-        if l and l not in seen:
-            seen[l] = h
-    ax.legend(seen.values(), seen.keys(), fontsize=9, loc="lower right")
-
-    ax.set_xlabel("Peak RSS (MB) — lower is better")
-    ax.set_ylabel("Mean accuracy across 5 benchmarks (%)")
-    ax.set_title("Memory–Accuracy Pareto: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
-                 "(hollow ○ = paper target,  filled ♦ = our measurement)")
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    path = out_dir / "memory_accuracy_pareto.png"
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    print(f"Saved {path}")
+    _accuracy_scatter(
+        df, out_dir,
+        x_col="peak_rss_mb", y_metric="mean_acc",
+        x_label="Peak RSS (MB) — lower is better",
+        y_label="Mean accuracy across 5 benchmarks (%)",
+        title="Memory–Accuracy Pareto: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
+              "(mean of ARC-Easy, ARC-Challenge, WinoGrande, HellaSwag, MMLU;  "
+              "hollow ○ = paper,  filled ♦ = ours)",
+        filename="memory_accuracy_pareto.png",
+        legend_loc="lower right",
+    )
+    for task, task_label in TASK_LABELS.items():
+        _accuracy_scatter(
+            df, out_dir,
+            x_col="peak_rss_mb", y_metric=task,
+            x_label="Peak RSS (MB) — lower is better",
+            y_label=f"{task_label} Accuracy (%)",
+            title=f"Memory–{task_label} Pareto: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
+                  f"(hollow ○ = paper target,  filled ♦ = our measurement)",
+            filename=f"{task}_memory_accuracy.png",
+        )
 
 
 def main():
@@ -687,7 +685,10 @@ def main():
 
     plot_throughput(local_df, PLOTS_DIR, qwen_df)
     plot_memory(local_df, PLOTS_DIR, qwen_df)
-    plot_throughput_by_config(local_df, PLOTS_DIR)
+    plot_throughput_by_config(local_df, PLOTS_DIR,
+                              "BitNet b1.58 2B4T", BITNET_COLOR, "bitnet_throughput_configs.png")
+    plot_throughput_by_config(qwen_df, PLOTS_DIR,
+                              "Qwen2.5-1.5B-Instruct Q8_0", QWEN_COLOR, "qwen_throughput_configs.png")
     plot_accuracy(local_acc, PLOTS_DIR, qwen_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
     plot_energy_carbon(local_df, qwen_df, PLOTS_DIR)
