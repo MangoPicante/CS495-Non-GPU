@@ -123,22 +123,32 @@ PAPER_TARGETS_BY_MODEL = {
     },
 }
 
+PAPER_LABEL_BY_MODEL = {
+    "bitnet": "BitNet b1.58 2B4T (paper i2_s, arXiv:2504.12285 Table 1)",
+    "qwen":   "Qwen2.5 1.5B (paper FP16, arXiv:2504.12285 Table 1)",
+}
 
-def resolve_paper_targets(choice: str, model_path: Path) -> dict:
-    """
-    Pick which model's paper numbers to compare against.
 
-    choice="auto" infers from the model path ("qwen" in name → qwen, else bitnet);
-    "none" disables comparison entirely (gap text and JSON paper_target are skipped);
-    explicit "bitnet"/"qwen" override detection.
+def resolve_paper_targets(choice: str, model_path: Path) -> tuple[dict[str, dict], dict[str, str]]:
     """
+    Pick which paper baselines to compare against.
+
+    Returns ({model_key: targets_dict}, {model_key: human_label}).
+
+    choice="both" (default) — compare against both BitNet i2_s and Qwen FP16.
+    choice="auto"           — same as "both"; the model_path argument is kept
+                              for backward compat but no longer disambiguates.
+    choice="bitnet"|"qwen"  — single baseline only.
+    choice="none"           — empty dicts; no paper comparison rendered.
+    """
+    _ = model_path  # retained for backward compat; selection is no longer path-based
     if choice == "none":
-        return {}
-    if choice == "auto":
-        if "qwen" in str(model_path).lower():
-            return PAPER_TARGETS_BY_MODEL["qwen"]
-        return PAPER_TARGETS_BY_MODEL["bitnet"]
-    return PAPER_TARGETS_BY_MODEL[choice]
+        return {}, {}
+    keys = ["bitnet", "qwen"] if choice in ("auto", "both") else [choice]
+    return (
+        {k: PAPER_TARGETS_BY_MODEL[k] for k in keys},
+        {k: PAPER_LABEL_BY_MODEL[k] for k in keys},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -934,12 +944,21 @@ def run_task(task: str, server: str, num_fewshot: int, limit: int | None,
         result["energy_kwh"] = round(energy_kwh, 6)
     if co2_kg is not None:
         result["co2_kg"] = round(co2_kg, 6)
-    target = (paper_targets or {}).get(task)
-    if target is not None:
-        result["paper_target"] = target
-    gap = result["accuracy"] - target if target is not None else None
-    gap_str = f"  (paper: {target}%,  gap: {gap:+.1f}%)" if gap is not None else ""
-    print(f"\nResult: {result['accuracy']}%  ({result['correct']}/{result['total']}){gap_str}")
+    # paper_targets is now {model_key: {task: float, ...}, ...}.  Record every
+    # available target for this task and emit one gap line per baseline so the
+    # user sees how the run compares against both BitNet i2_s and Qwen FP16.
+    per_baseline = {}
+    for model_key, ts in (paper_targets or {}).items():
+        t = ts.get(task)
+        if t is not None:
+            per_baseline[model_key] = t
+    if per_baseline:
+        result["paper_targets"] = per_baseline
+    print(f"\nResult: {result['accuracy']}%  ({result['correct']}/{result['total']})")
+    for model_key, t in per_baseline.items():
+        gap = result["accuracy"] - t
+        label = PAPER_LABEL_BY_MODEL.get(model_key, model_key)
+        print(f"  vs {label}: {t}%  gap: {gap:+.1f}%")
     print(f"Time:   {elapsed:.0f}s", end="")
     if energy_kwh is not None:
         print(f"   Energy: {energy_kwh*1000:.2f} Wh   CO2: {(co2_kg or 0)*1000:.2f} g", end="")
@@ -967,13 +986,15 @@ def main():
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--no-energy", action="store_true",
                         help="Skip CodeCarbon energy tracking (faster, no internet needed)")
-    parser.add_argument("--paper-targets", choices=["auto", "bitnet", "qwen", "none"],
-                        default="auto",
-                        help="Which model's paper numbers to report gap against "
-                             "(default: auto — detect from --model path)")
+    parser.add_argument("--paper-targets",
+                        choices=["both", "auto", "bitnet", "qwen", "none"],
+                        default="both",
+                        help="Which paper baselines to compare against "
+                             "(default: both — show BitNet i2_s and Qwen FP16 "
+                             "gaps for every task)")
     args = parser.parse_args()
 
-    paper_targets = resolve_paper_targets(args.paper_targets, args.model)
+    paper_targets, paper_labels = resolve_paper_targets(args.paper_targets, args.model)
 
     port = int(args.server.split(":")[-1])
     tasks = TASKS if args.task == "all" else [args.task]
@@ -1012,13 +1033,39 @@ def main():
         json.dump(existing, f, indent=2)
     print(f"\nResults saved to {args.out}")
 
-    print(f"\n{'Task':<20} {'Accuracy':>10} {'Paper':>8} {'Gap':>7} {'N':>6}")
-    print("-" * 55)
-    for task, r in all_results.items():
-        target = r.get("paper_target", "-")
-        gap = (r["accuracy"] - target) if isinstance(target, float) else "-"
-        gap_str = f"{gap:+.1f}%" if isinstance(gap, float) else "-"
-        print(f"{task:<20} {r['accuracy']:>9.2f}% {str(target)+' %':>8} {gap_str:>7} {r['total']:>6}")
+    if paper_labels:
+        # Print which baselines are being compared against, then a single table
+        # with one (target, gap) pair per baseline.  Hardcoded keys keep the
+        # column layout stable; new baselines would need a column added here.
+        keys = list(paper_labels.keys())
+        print("\nPaper baselines (arXiv:2504.12285 Table 1):")
+        for k in keys:
+            print(f"  {k:<6} = {paper_labels[k]}")
+        col_titles = {"bitnet": "BitNet", "qwen": "Qwen"}
+        header = f"\n{'Task':<20} {'Accuracy':>9}"
+        for k in keys:
+            header += f"   {col_titles.get(k, k.title()):>8} {'Δ':>7}"
+        header += f"   {'N':>5}"
+        print(header)
+        print("-" * len(header.lstrip("\n")))
+        for task, r in all_results.items():
+            row = f"{task:<20} {r['accuracy']:>8.2f}%"
+            targets = r.get("paper_targets", {})
+            for k in keys:
+                t = targets.get(k)
+                if isinstance(t, (int, float)):
+                    gap = r["accuracy"] - t
+                    row += f"   {t:>7.2f}% {gap:>+6.1f}%"
+                else:
+                    row += f"   {'-':>8} {'-':>7}"
+            row += f"   {r['total']:>5}"
+            print(row)
+    else:
+        # --paper-targets none: no comparison shown.
+        print(f"\n{'Task':<20} {'Accuracy':>10} {'N':>6}")
+        print("-" * 38)
+        for task, r in all_results.items():
+            print(f"{task:<20} {r['accuracy']:>9.2f}% {r['total']:>6}")
 
     if _server_proc is not None:
         _server_proc.terminate()

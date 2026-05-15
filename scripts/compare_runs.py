@@ -37,6 +37,8 @@ DEFAULT_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_res
 DEFAULT_COMPARISON_CSV = Path(__file__).parent.parent / "results" / "comparison_table.csv"
 DEFAULT_QWEN_CSV = Path(__file__).parent.parent / "results" / "qwen_step_metrics.csv"
 DEFAULT_QWEN_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen.json"
+DEFAULT_QWEN_Q4_CSV = Path(__file__).parent.parent / "results" / "qwen_q4_step_metrics.csv"
+DEFAULT_QWEN_Q4_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen_q4.json"
 
 # AWS c5.xlarge on-demand, us-east-1 (4 vCPUs — matches 4-thread benchmark condition)
 # Source: https://instances.vantage.sh/aws/ec2/c5.xlarge (retrieved 2026-05-08)
@@ -88,10 +90,12 @@ QWEN_PAPER = {
 # Color convention used across all comparison plots:
 #   Other paper baselines  → blue
 #   BitNet                 → orange (paper hatched, ours solid)
-#   Qwen                   → green  (paper hatched, ours solid)
-OTHER_COLOR  = "#4C72B0"
-BITNET_COLOR = "#DD8452"
-QWEN_COLOR   = "#55A868"
+#   Qwen Q8_0              → green  (paper FP16 hatched, ours solid)
+#   Qwen Q4_K_M            → purple (ours only — no paper baseline)
+OTHER_COLOR   = "#4C72B0"
+BITNET_COLOR  = "#DD8452"
+QWEN_COLOR    = "#55A868"
+QWEN_Q4_COLOR = "#8172B2"
 
 # Display names for the five accuracy tasks (used in per-task plot titles/labels)
 TASK_LABELS = {
@@ -109,6 +113,8 @@ def parse_args():
     p.add_argument("--accuracy", default=str(DEFAULT_ACCURACY_JSON))
     p.add_argument("--qwen-results", default=str(DEFAULT_QWEN_CSV))
     p.add_argument("--qwen-accuracy", default=str(DEFAULT_QWEN_ACCURACY_JSON))
+    p.add_argument("--qwen-q4-results", default=str(DEFAULT_QWEN_Q4_CSV))
+    p.add_argument("--qwen-q4-accuracy", default=str(DEFAULT_QWEN_Q4_ACCURACY_JSON))
     p.add_argument("--csv", default=str(DEFAULT_COMPARISON_CSV))
     p.add_argument(
         "--hardware-rate",
@@ -187,6 +193,8 @@ def build_comparison_df(
     hardware_rate: float,
     qwen_df: pd.DataFrame | None = None,
     qwen_acc: dict | None = None,
+    qwen_q4_df: pd.DataFrame | None = None,
+    qwen_q4_acc: dict | None = None,
 ) -> pd.DataFrame:
     ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
     rows = []
@@ -243,6 +251,19 @@ def build_comparison_df(
             **{f: (round(q_acc[f], 2) if q_acc.get(f) is not None else "") for f in ACC_FIELDS},
         })
 
+    q4_acc = qwen_q4_acc or {}
+    if qwen_q4_df is not None or any(q4_acc.get(f) is not None for f in ACC_FIELDS):
+        q4_tps, q4_rss = _bench_row(qwen_q4_df) if qwen_q4_df is not None else (None, None)
+        q4_cost = round(cost_per_1k(q4_tps, hardware_rate), 6) if q4_tps else ""
+        rows.append({
+            "model": "Qwen2.5-1.5B-Instruct Q4_K_M",
+            "source": "ours",
+            "throughput_tokens_s": round(q4_tps, 2) if q4_tps is not None else "",
+            "peak_rss_mb": round(q4_rss, 0) if q4_rss is not None else "",
+            "cost_per_1k_tokens": q4_cost,
+            **{f: (round(q4_acc[f], 2) if q4_acc.get(f) is not None else "") for f in ACC_FIELDS},
+        })
+
     return pd.DataFrame(rows)
 
 
@@ -253,11 +274,13 @@ def write_comparison_csv(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def _bar_series(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None,
+                qwen_q4_df: pd.DataFrame | None,
                 metric: str) -> tuple[list[str], list[float], list[str], list[str]]:
     """
     Build the (labels, values, colors, hatches) tuple for a horizontal bar chart.
 
-    Order: other paper baselines → BitNet (paper, ours) → Qwen (paper, ours-if-available).
+    Order: other paper baselines → BitNet (paper, ours) → Qwen (paper FP16,
+    Q8 ours, Q4 ours).  Each "ours" row is conditional on local data existing.
     `metric` selects which field to read from each paper dict / which bench column.
     """
     metric_col = "throughput_tokens_s" if metric == "throughput_tokens_s" else "peak_rss_mb"
@@ -288,10 +311,18 @@ def _bar_series(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None,
         colors.append(QWEN_COLOR)
         hatches.append("")
 
+    q4_tps, q4_rss = _bench_row(qwen_q4_df) if qwen_q4_df is not None else (None, None)
+    q4_val = q4_tps if metric_col == "throughput_tokens_s" else q4_rss
+    if q4_val is not None:
+        labels.append("Qwen2.5-1.5B-Instruct Q4_K_M (ours)")
+        values.append(q4_val)
+        colors.append(QWEN_Q4_COLOR)
+        hatches.append("")
+
     return labels, values, colors, hatches
 
 
-def _legend_handles(qwen_df: pd.DataFrame | None):
+def _legend_handles(qwen_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | None = None):
     from matplotlib.patches import Patch
     handles = [
         Patch(facecolor=OTHER_COLOR,  edgecolor="#cccccc", label="Other FP16 baseline (paper)"),
@@ -301,14 +332,18 @@ def _legend_handles(qwen_df: pd.DataFrame | None):
     ]
     if qwen_df is not None:
         handles.append(Patch(facecolor=QWEN_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q8_0 (ours)"))
+    if qwen_q4_df is not None:
+        handles.append(Patch(facecolor=QWEN_Q4_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q4_K_M (ours)"))
     return handles
 
 
-def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | None = None):
-    if not _has_bench_data(local_df) and not _has_bench_data(qwen_df):
+def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
+                    qwen_df: pd.DataFrame | None = None,
+                    qwen_q4_df: pd.DataFrame | None = None):
+    if not _has_bench_data(local_df) and not _has_bench_data(qwen_df) and not _has_bench_data(qwen_q4_df):
         print("Skipping throughput plot: no benchmark CSVs (run 'make benchmark').")
         return
-    labels, values, colors, hatches = _bar_series(local_df, qwen_df, "throughput_tokens_s")
+    labels, values, colors, hatches = _bar_series(local_df, qwen_df, qwen_q4_df, "throughput_tokens_s")
 
     fig, ax = plt.subplots(figsize=(10, max(5, len(labels) * 0.55)))
     max_val = max(v for v in values if v) or 1
@@ -323,7 +358,7 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame
                  "(n_prompt=512, n_gen=128, CPU)")
     ax.set_xlim(0, max_val * 1.15)
     ax.invert_yaxis()
-    ax.legend(handles=_legend_handles(qwen_df), loc="lower right", fontsize=8)
+    ax.legend(handles=_legend_handles(qwen_df, qwen_q4_df), loc="lower right", fontsize=8)
     fig.tight_layout()
     path = out_dir / "throughput_comparison.png"
     fig.savefig(path, dpi=150)
@@ -331,11 +366,13 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame
     print(f"Saved {path}")
 
 
-def plot_memory(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | None = None):
-    if not _has_bench_data(local_df) and not _has_bench_data(qwen_df):
+def plot_memory(local_df: pd.DataFrame, out_dir: Path,
+                qwen_df: pd.DataFrame | None = None,
+                qwen_q4_df: pd.DataFrame | None = None):
+    if not _has_bench_data(local_df) and not _has_bench_data(qwen_df) and not _has_bench_data(qwen_q4_df):
         print("Skipping memory plot: no benchmark CSVs (run 'make benchmark').")
         return
-    labels, values, colors, hatches = _bar_series(local_df, qwen_df, "peak_rss_mb")
+    labels, values, colors, hatches = _bar_series(local_df, qwen_df, qwen_q4_df, "peak_rss_mb")
 
     fig, ax = plt.subplots(figsize=(10, max(5, len(labels) * 0.55)))
     max_val = max(v for v in values if v) or 1
@@ -350,7 +387,7 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path, qwen_df: pd.DataFrame | N
                  "(n_prompt=512, n_gen=128, CPU)")
     ax.set_xlim(0, max_val * 1.18)
     ax.invert_yaxis()
-    ax.legend(handles=_legend_handles(qwen_df), loc="lower right", fontsize=8)
+    ax.legend(handles=_legend_handles(qwen_df, qwen_q4_df), loc="lower right", fontsize=8)
     fig.tight_layout()
     path = out_dir / "memory_comparison.png"
     fig.savefig(path, dpi=150)
@@ -377,19 +414,23 @@ def plot_throughput_by_config(df: pd.DataFrame, out_dir: Path,
     print(f"Saved {path}")
 
 
-def plot_accuracy(local_acc: dict, out_dir: Path, qwen_acc: dict | None = None):
+def plot_accuracy(local_acc: dict, out_dir: Path,
+                  qwen_acc: dict | None = None,
+                  qwen_q4_acc: dict | None = None):
     tasks = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
     task_labels = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
     task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
     other_models = list(OTHER_BASELINES.keys())
-    # Column order: other paper baselines, BitNet (paper, ours), Qwen (paper, ours-if-available)
+    # Column order: other paper baselines, BitNet (paper, ours), Qwen (paper, Q8, Q4)
     all_models = other_models + [
         "BitNet 2B4T\n(paper)", "BitNet 2B4T\n(ours)",
         "Qwen2.5 1.5B\n(paper FP16)",
     ]
     if qwen_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ8_0 (ours)")
+    if qwen_q4_acc is not None:
+        all_models.append("Qwen2.5-1.5B\nQ4_K_M (ours)")
 
     x = np.arange(len(all_models))
     n_tasks = len(tasks)
@@ -404,6 +445,8 @@ def plot_accuracy(local_acc: dict, out_dir: Path, qwen_acc: dict | None = None):
         )
         if qwen_acc is not None:
             vals.append(qwen_acc.get(task) or 0)
+        if qwen_q4_acc is not None:
+            vals.append(qwen_q4_acc.get(task) or 0)
         ax.bar(x + offsets[i], vals, width, label=label, color=color)
 
     ax.set_xticks(x)
@@ -468,27 +511,32 @@ def _accuracy_scatter(
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    QWEN_OURS_NAME  = "Qwen2.5-1.5B-Instruct Q8_0"
-    QWEN_PAPER_NAME = "Qwen2.5 1.5B"
-    BITNET_NAME     = "BitNet b1.58 2B4T"
+    QWEN_OURS_NAME    = "Qwen2.5-1.5B-Instruct Q8_0"
+    QWEN_Q4_OURS_NAME = "Qwen2.5-1.5B-Instruct Q4_K_M"
+    QWEN_PAPER_NAME   = "Qwen2.5 1.5B"
+    BITNET_NAME       = "BitNet b1.58 2B4T"
 
     by_key = {
         (row["model"], row["source"]): (row[x_col], row["_y"])
         for _, row in plot_df.iterrows()
     }
-    for ours_key, paper_key, color in [
-        ((BITNET_NAME, "ours"),    (BITNET_NAME, "paper"),           BITNET_COLOR),
-        ((QWEN_OURS_NAME, "ours"), (QWEN_PAPER_NAME, "paper (FP16)"), QWEN_COLOR),
+    # Dotted connectors visualize the paper→ours or quant-chain delta.
+    # For Qwen the chain is FP16 paper → Q8 ours → Q4 ours.
+    for ours_key, from_key, color in [
+        ((BITNET_NAME, "ours"),       (BITNET_NAME, "paper"),            BITNET_COLOR),
+        ((QWEN_OURS_NAME, "ours"),    (QWEN_PAPER_NAME, "paper (FP16)"), QWEN_COLOR),
+        ((QWEN_Q4_OURS_NAME, "ours"), (QWEN_OURS_NAME, "ours"),          QWEN_Q4_COLOR),
     ]:
-        if ours_key in by_key and paper_key in by_key:
-            x0, y0 = by_key[paper_key]
+        if ours_key in by_key and from_key in by_key:
+            x0, y0 = by_key[from_key]
             x1, y1 = by_key[ours_key]
             ax.plot([x0, x1], [y0, y1], linestyle=":", color=color, alpha=0.55, zorder=2)
 
     for _, row in plot_df.iterrows():
         source, model = row["source"], row["model"]
-        is_qwen_ours  = source == "ours" and model == QWEN_OURS_NAME
-        is_qwen_paper = source == "paper (FP16)" and model == QWEN_PAPER_NAME
+        is_qwen_ours    = source == "ours" and model == QWEN_OURS_NAME
+        is_qwen_q4_ours = source == "ours" and model == QWEN_Q4_OURS_NAME
+        is_qwen_paper   = source == "paper (FP16)" and model == QWEN_PAPER_NAME
         is_ours = source == "ours"
         if is_qwen_paper:
             color, label = QWEN_COLOR, "Qwen2.5 1.5B (paper FP16)"
@@ -496,6 +544,8 @@ def _accuracy_scatter(
             color, label = OTHER_COLOR, "Other FP16 baseline (paper)"
         elif source == "paper":
             color, label = BITNET_COLOR, "BitNet b1.58 2B4T (paper)"
+        elif is_qwen_q4_ours:
+            color, label = QWEN_Q4_COLOR, "Qwen2.5-1.5B Q4_K_M (ours)"
         elif is_qwen_ours:
             color, label = QWEN_COLOR, "Qwen2.5-1.5B Q8_0 (ours)"
         else:
@@ -510,12 +560,21 @@ def _accuracy_scatter(
                        facecolors="white", edgecolors=color, marker="o",
                        s=110, linewidths=2, label=label, zorder=3)
 
-        ann = model.replace(" b1.58 2B4T", "").replace(" (FP16)", "").replace(" Q8_0", "")
+        # Short labels: "BitNet (ours)", "Qwen Q8_0 (ours)", "Qwen Q4_K_M (ours)",
+        # "Qwen (paper)".  Keep quant suffix on ours so Q8 and Q4 are distinguishable.
+        ann = (model
+               .replace(" b1.58 2B4T", "")
+               .replace("Qwen2.5-1.5B-Instruct ", "Qwen ")
+               .replace("Qwen2.5 1.5B", "Qwen")
+               .replace(" (FP16)", ""))
         ann += " (ours)" if is_ours else " (paper)"
-        # Offset paper labels above-right and ours labels below-right so each
-        # model's paper/ours pair separates even when the points sit nearly on
-        # top of each other (e.g. BitNet ours ≈ BitNet paper on MMLU/cost).
-        xy_offset = (8, -10) if is_ours else (8, 6)
+        # Stagger ours offsets so Q8 and Q4 don't overlap when their points sit close.
+        if is_qwen_q4_ours:
+            xy_offset = (8, -22)
+        elif is_ours:
+            xy_offset = (8, -10)
+        else:
+            xy_offset = (8, 6)
         ax.annotate(ann, (row[x_col], row["_y"]),
                     textcoords="offset points", xytext=xy_offset, fontsize=8)
 
@@ -562,7 +621,8 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
         )
 
 
-def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None, out_dir: Path):
+def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None,
+                       out_dir: Path, qwen_q4_df: pd.DataFrame | None = None):
     """
     Two-panel energy + carbon footprint per 1,000 tokens at n_prompt=512, n_gen=128.
 
@@ -587,12 +647,14 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None, out
         return float(vals.median() * scale / (512 + 128))
 
     # Wh = kWh × 1000;  g = kg × 1000.  Both × 1000 again to express "per 1k tokens".
-    bitnet_wh   = per_1k(local_df, "energy_kwh", 1_000_000)
-    qwen_wh     = per_1k(qwen_df,  "energy_kwh", 1_000_000)
-    bitnet_gco2 = per_1k(local_df, "co2_kg",     1_000_000)
-    qwen_gco2   = per_1k(qwen_df,  "co2_kg",     1_000_000)
+    bitnet_wh    = per_1k(local_df,   "energy_kwh", 1_000_000)
+    qwen_wh      = per_1k(qwen_df,    "energy_kwh", 1_000_000)
+    qwen_q4_wh   = per_1k(qwen_q4_df, "energy_kwh", 1_000_000)
+    bitnet_gco2  = per_1k(local_df,   "co2_kg",     1_000_000)
+    qwen_gco2    = per_1k(qwen_df,    "co2_kg",     1_000_000)
+    qwen_q4_gco2 = per_1k(qwen_q4_df, "co2_kg",     1_000_000)
 
-    if bitnet_wh is None and qwen_wh is None:
+    if bitnet_wh is None and qwen_wh is None and qwen_q4_wh is None:
         print("Skipping energy/carbon plot: no energy_kwh data in benchmark CSVs.")
         return
 
@@ -601,6 +663,8 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None, out
         rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2))
     if qwen_wh is not None:
         rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_COLOR, qwen_wh, qwen_gco2))
+    if qwen_q4_wh is not None:
+        rows.append(("Qwen2.5-1.5B Q4_K_M (ours)", QWEN_Q4_COLOR, qwen_q4_wh, qwen_q4_gco2))
 
     fig, (ax_e, ax_c) = plt.subplots(
         1, 2, figsize=(13, max(3.5, len(rows) * 1.2)), sharey=True
@@ -678,20 +742,28 @@ def main():
     local_acc = load_accuracy(Path(args.accuracy))
     qwen_df = load_qwen(Path(args.qwen_results))
     qwen_acc = load_accuracy(Path(args.qwen_accuracy))
+    qwen_q4_df = load_qwen(Path(args.qwen_q4_results))
+    qwen_q4_acc = load_accuracy(Path(args.qwen_q4_accuracy))
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    comparison_df = build_comparison_df(local_df, local_acc, args.hardware_rate, qwen_df, qwen_acc)
+    comparison_df = build_comparison_df(
+        local_df, local_acc, args.hardware_rate,
+        qwen_df, qwen_acc,
+        qwen_q4_df, qwen_q4_acc,
+    )
     write_comparison_csv(comparison_df, Path(args.csv))
 
-    plot_throughput(local_df, PLOTS_DIR, qwen_df)
-    plot_memory(local_df, PLOTS_DIR, qwen_df)
+    plot_throughput(local_df, PLOTS_DIR, qwen_df, qwen_q4_df)
+    plot_memory(local_df, PLOTS_DIR, qwen_df, qwen_q4_df)
     plot_throughput_by_config(local_df, PLOTS_DIR,
                               "BitNet b1.58 2B4T", BITNET_COLOR, "bitnet_throughput_configs.png")
     plot_throughput_by_config(qwen_df, PLOTS_DIR,
                               "Qwen2.5-1.5B-Instruct Q8_0", QWEN_COLOR, "qwen_throughput_configs.png")
-    plot_accuracy(local_acc, PLOTS_DIR, qwen_acc)
+    plot_throughput_by_config(qwen_q4_df, PLOTS_DIR,
+                              "Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_Q4_COLOR, "qwen_q4_throughput_configs.png")
+    plot_accuracy(local_acc, PLOTS_DIR, qwen_acc, qwen_q4_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
-    plot_energy_carbon(local_df, qwen_df, PLOTS_DIR)
+    plot_energy_carbon(local_df, qwen_df, PLOTS_DIR, qwen_q4_df)
     plot_memory_accuracy(comparison_df, PLOTS_DIR)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
