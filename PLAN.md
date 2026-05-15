@@ -286,6 +286,12 @@ from arXiv:2504.12285 Table 1), and writes:
    - `{task}_memory_accuracy.png` per task
    - `energy_carbon_comparison.png` — three panels: Wh, gCO₂, and USD (local
      electricity cost at `--electricity-rate`) per 1k tokens
+   - `cloud_cost_comparison.png` — log-scale bar chart of $/1k output tokens
+     comparing self-hosted (BitNet/Qwen, both AWS-proxy and local-electricity
+     framings) against cloud API services (OpenAI GPT-4o / GPT-4o mini,
+     Anthropic Claude Haiku 4.5 / Sonnet 4.5 / Opus 4.7).  API prices are
+     hardcoded in `CLOUD_API_PRICING` and should be re-verified before
+     publication.
 
    The cost– and memory–accuracy scatters share a single `_accuracy_scatter`
    helper so the hollow-vs-filled marker convention and dotted paper→ours

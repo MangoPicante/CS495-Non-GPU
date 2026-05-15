@@ -103,10 +103,25 @@ QWEN_PAPER = {
 #   BitNet                 → orange (paper hatched, ours solid)
 #   Qwen Q8_0              → green  (paper FP16 hatched, ours solid)
 #   Qwen Q4_K_M            → purple (ours only — no paper baseline)
-OTHER_COLOR   = "#4C72B0"
-BITNET_COLOR  = "#DD8452"
-QWEN_COLOR    = "#55A868"
-QWEN_Q4_COLOR = "#8172B2"
+OTHER_COLOR     = "#4C72B0"
+BITNET_COLOR    = "#DD8452"
+QWEN_COLOR      = "#55A868"
+QWEN_Q4_COLOR   = "#8172B2"
+CLOUD_API_COLOR = "#7F7F7F"
+
+# Cloud API output-token pricing as of 2026-05-15 ($/1M output tokens).
+# Verify against each provider's pricing page before publication — these
+# change.  Output pricing is used because our throughput metric is for
+# generated tokens; input pricing is typically much lower.
+#   OpenAI:     https://openai.com/api/pricing
+#   Anthropic:  https://www.anthropic.com/pricing#api
+CLOUD_API_PRICING = {
+    "OpenAI GPT-4o mini":          0.60,
+    "Anthropic Claude Haiku 4.5":  5.00,
+    "OpenAI GPT-4o":              10.00,
+    "Anthropic Claude Sonnet 4.5": 15.00,
+    "Anthropic Claude Opus 4.7":  75.00,
+}
 
 # Display names for the five accuracy tasks (used in per-task plot titles/labels)
 TASK_LABELS = {
@@ -763,6 +778,115 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None,
     print(f"Saved {path}")
 
 
+def plot_cloud_cost_comparison(local_df: pd.DataFrame,
+                               qwen_df: pd.DataFrame | None,
+                               qwen_q4_df: pd.DataFrame | None,
+                               out_dir: Path,
+                               hardware_rate: float,
+                               electricity_rate: float):
+    """
+    Cost-per-1k-output-tokens across self-hosted (BitNet / Qwen) and cloud
+    API services.  Each self-hosted model contributes two bars:
+      - AWS c5.xlarge proxy (hatched) — what cloud rental would cost
+      - local electricity (solid)     — marginal cost on hardware you own
+
+    Cloud-API rows are taken from `CLOUD_API_PRICING` (output token rates).
+    Log-x scale because prices span ~3 orders of magnitude.
+    """
+    entries: list[tuple[str, float, str, str]] = []  # (label, cost, color, hatch)
+    for name, df, color in [
+        ("BitNet b1.58 2B4T",   local_df,   BITNET_COLOR),
+        ("Qwen2.5-1.5B Q8_0",   qwen_df,    QWEN_COLOR),
+        ("Qwen2.5-1.5B Q4_K_M", qwen_q4_df, QWEN_Q4_COLOR),
+    ]:
+        if df is None or df.empty:
+            continue
+        tps, _ = _bench_row(df)
+        if tps is not None:
+            entries.append((f"{name} (ours, AWS c5.xlarge proxy)",
+                            cost_per_1k(tps, hardware_rate), color, "///"))
+        e = energy_cost_per_1k(df, electricity_rate)
+        if e is not None:
+            entries.append((f"{name} (ours, local electricity)", e, color, ""))
+
+    for name, price_per_million in CLOUD_API_PRICING.items():
+        entries.append((f"{name} (API output)",
+                        price_per_million / 1000.0, CLOUD_API_COLOR, ""))
+
+    if not entries:
+        print("Skipping cloud cost plot: no self-hosted cost data.")
+        return
+
+    entries.sort(key=lambda e: e[1])  # cheapest at top after invert_yaxis
+
+    fig, ax = plt.subplots(figsize=(12, max(5, len(entries) * 0.45)))
+    for i, (label, cost, color, hatch) in enumerate(entries):
+        ax.barh(i, cost, color=color, hatch=hatch,
+                edgecolor="#444444" if hatch else "#cccccc", linewidth=0.5)
+        if cost >= 1.0:
+            text = f"${cost:.2f}"
+        elif cost >= 0.01:
+            text = f"${cost:.4f}"
+        else:
+            text = f"${cost:.6f}"
+        ax.text(cost * 1.15, i, text, va="center", fontsize=9)
+
+    ax.set_yticks(range(len(entries)))
+    ax.set_yticklabels([e[0] for e in entries])
+    ax.invert_yaxis()
+    ax.set_xscale("log")
+    # Extend xlim so the text labels at the right edge of the longest bars
+    # don't collide with the figure border on log scale.
+    finite_costs = [c for _, c, *_ in entries]
+    ax.set_xlim(min(finite_costs) * 0.6, max(finite_costs) * 6)
+    ax.set_xlabel("Cost per 1,000 output tokens (USD, log scale)")
+    # Escape $ as \$ so matplotlib's mathtext doesn't treat them as delimiters
+    # (it would otherwise italicize the text between two literal $ signs).
+    ax.set_title(
+        "Cost: Self-hosted (BitNet / Qwen) vs Cloud API Services\n"
+        f"(AWS c5.xlarge @ \\${hardware_rate:.3f}/hr · electricity @ \\${electricity_rate:.2f}/kWh"
+        f" · API pricing per provider, retrieved 2026-05-15)"
+    )
+
+    from matplotlib.patches import Patch
+    handles = []
+    have_bitnet = any(label.startswith("BitNet") for label, *_ in entries)
+    have_qwen   = any(label.startswith("Qwen2.5-1.5B Q8_0") for label, *_ in entries)
+    have_q4     = any(label.startswith("Qwen2.5-1.5B Q4_K_M") for label, *_ in entries)
+    if have_bitnet:
+        handles += [
+            Patch(facecolor=BITNET_COLOR, hatch="///", edgecolor="#444444",
+                  label="BitNet (ours, AWS proxy)"),
+            Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc",
+                  label="BitNet (ours, local electricity)"),
+        ]
+    if have_qwen:
+        handles += [
+            Patch(facecolor=QWEN_COLOR, hatch="///", edgecolor="#444444",
+                  label="Qwen Q8_0 (ours, AWS proxy)"),
+            Patch(facecolor=QWEN_COLOR, edgecolor="#cccccc",
+                  label="Qwen Q8_0 (ours, local electricity)"),
+        ]
+    if have_q4:
+        handles += [
+            Patch(facecolor=QWEN_Q4_COLOR, hatch="///", edgecolor="#444444",
+                  label="Qwen Q4_K_M (ours, AWS proxy)"),
+            Patch(facecolor=QWEN_Q4_COLOR, edgecolor="#cccccc",
+                  label="Qwen Q4_K_M (ours, local electricity)"),
+        ]
+    handles.append(Patch(facecolor=CLOUD_API_COLOR, edgecolor="#cccccc",
+                          label="Cloud API (output token price)"))
+    # "center right" sits between the short (top) and long (bottom) bars at
+    # the log-scale's right edge, where there's no bar competition either way.
+    ax.legend(handles=handles, loc="center right", fontsize=8)
+
+    fig.tight_layout()
+    path = out_dir / "cloud_cost_comparison.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
 def plot_memory_accuracy(df: pd.DataFrame, out_dir: Path):
     """
     Memory vs accuracy: mean-of-5 Pareto plot plus one plot per task.
@@ -824,6 +948,8 @@ def main():
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
     plot_energy_carbon(local_df, qwen_df, PLOTS_DIR, qwen_q4_df,
                        electricity_rate=args.electricity_rate)
+    plot_cloud_cost_comparison(local_df, qwen_df, qwen_q4_df, PLOTS_DIR,
+                                args.hardware_rate, args.electricity_rate)
     plot_memory_accuracy(comparison_df, PLOTS_DIR)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
