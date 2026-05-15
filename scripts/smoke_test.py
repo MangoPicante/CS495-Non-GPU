@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import csv
+import json
 import os
 import re
 import subprocess
@@ -388,6 +389,18 @@ for _name, _server_bin, _model_path in _eval_configs:
                 timeout=EVAL_TIMEOUT,
             )
             check(f"{task}: exits 0", r.returncode == 0, r.stderr.strip()[:200])
+            # An overall 0% is essentially impossible for these models on this
+            # sample size by chance — it almost always indicates a scoring
+            # methodology regression (e.g. prompt format mismatch, tokenizer
+            # mismatch, broken continuation-scoring path). Flag it loudly.
+            if r.returncode == 0 and EVAL_SMOKE_OUT.exists():
+                try:
+                    acc = json.loads(EVAL_SMOKE_OUT.read_text()).get(task, {}).get("accuracy")
+                except (json.JSONDecodeError, OSError) as e:
+                    check(f"{task}: accuracy readable", False, str(e)[:100])
+                else:
+                    ok = isinstance(acc, (int, float)) and acc > 0
+                    check(f"{task}: accuracy > 0%", ok, f"got {acc!r}")
         except subprocess.TimeoutExpired:
             check(f"{task}: completed within {EVAL_TIMEOUT}s", False, "TIMEOUT")
     _stop_eval_server()
