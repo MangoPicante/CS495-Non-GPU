@@ -330,7 +330,8 @@ if csv_path.exists():
     check("≥7 data rows (5 FP16 + paper + ours [+ Qwen ours])", len(rows) >= 7, f"got {len(rows)}")
     required_cols = {
         "model", "source", "throughput_tokens_s", "peak_rss_mb",
-        "cost_per_1k_tokens", "arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu",
+        "cost_per_1k_tokens", "energy_cost_per_1k_tokens",
+        "arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu",
     }
     missing = required_cols - set(rows[0].keys()) if rows else required_cols
     check("all expected columns present", not missing, f"missing {missing}")

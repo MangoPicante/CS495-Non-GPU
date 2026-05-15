@@ -13,6 +13,11 @@ On-demand pricing is used rather than spot for reproducibility — spot prices
 change hourly and would make cost numbers non-comparable across runs.
 Override with --hardware-rate if running on different hardware.
 
+Electricity rate default: $0.16/kWh (US residential average).  Used to convert
+CodeCarbon's measured energy_kwh into a dollar cost per 1k tokens, which lives
+alongside the AWS proxy cost in comparison_table.csv (column:
+energy_cost_per_1k_tokens).  Override with --electricity-rate.
+
 Usage:
     python scripts/compare_runs.py
         [--results results/bitnet_step_metrics.csv]
@@ -21,6 +26,7 @@ Usage:
         [--qwen-accuracy results/accuracy_results_qwen.json]
         [--csv results/comparison_table.csv]
         [--hardware-rate 0.170]
+        [--electricity-rate 0.16]
 """
 
 import argparse
@@ -43,6 +49,11 @@ DEFAULT_QWEN_Q4_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accu
 # AWS c5.xlarge on-demand, us-east-1 (4 vCPUs — matches 4-thread benchmark condition)
 # Source: https://instances.vantage.sh/aws/ec2/c5.xlarge (retrieved 2026-05-08)
 DEFAULT_HARDWARE_RATE = 0.170
+
+# US residential average electricity rate (EIA, 2026 estimate, $/kWh).
+# Used to convert CodeCarbon's energy_kwh into a dollar cost.  Override with
+# --electricity-rate for industrial (~$0.10) or your local utility's rate.
+DEFAULT_ELECTRICITY_RATE = 0.16
 
 # Published FP16 baseline numbers from arXiv:2504.12285 Table 1
 # Throughput condition: n_prompt=512, n_gen=128, single-thread x86 CPU
@@ -123,6 +134,14 @@ def parse_args():
         metavar="$/HR",
         help="On-demand $/hr for the target instance (default: %(default)s — AWS c5.xlarge us-east-1)",
     )
+    p.add_argument(
+        "--electricity-rate",
+        type=float,
+        default=DEFAULT_ELECTRICITY_RATE,
+        metavar="$/KWH",
+        help="Local electricity rate $/kWh used to convert CodeCarbon energy_kwh "
+             "to dollars (default: %(default)s — US residential average)",
+    )
     return p.parse_args()
 
 
@@ -187,6 +206,23 @@ def cost_per_1k(throughput_tokens_s: float, rate_per_hour: float) -> float:
     return (1000.0 / throughput_tokens_s / 3600.0) * rate_per_hour
 
 
+def energy_cost_per_1k(df: pd.DataFrame | None, electricity_rate: float) -> float | None:
+    """
+    Dollar cost of electricity to generate 1,000 tokens at the (512, 128)
+    reference config, using CodeCarbon's measured energy_kwh.
+
+    Returns None when no energy data is present (paper rows; --no-energy runs).
+    """
+    if df is None or df.empty or "energy_kwh" not in df.columns:
+        return None
+    row = df[(df["n_prompt"] == 512) & (df["n_gen"] == 128)].copy()
+    row["energy_kwh"] = pd.to_numeric(row["energy_kwh"], errors="coerce")
+    e = row["energy_kwh"].dropna().median()
+    if pd.isna(e):
+        return None
+    return (e / (512 + 128)) * 1000.0 * electricity_rate
+
+
 def build_comparison_df(
     local_df: pd.DataFrame,
     local_acc: dict,
@@ -195,6 +231,7 @@ def build_comparison_df(
     qwen_acc: dict | None = None,
     qwen_q4_df: pd.DataFrame | None = None,
     qwen_q4_acc: dict | None = None,
+    electricity_rate: float = DEFAULT_ELECTRICITY_RATE,
 ) -> pd.DataFrame:
     ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
     rows = []
@@ -206,6 +243,9 @@ def build_comparison_df(
             "throughput_tokens_s": b["throughput_tokens_s"],
             "peak_rss_mb": b["peak_rss_mb"],
             "cost_per_1k_tokens": round(cost_per_1k(b["throughput_tokens_s"], hardware_rate), 6),
+            # No CodeCarbon measurement for paper rows — would require running
+            # those FP16 baselines locally, which is outside this project's scope.
+            "energy_cost_per_1k_tokens": "",
             **{f: b[f] for f in ACC_FIELDS},
         })
 
@@ -215,17 +255,20 @@ def build_comparison_df(
         "throughput_tokens_s": BITNET_PAPER["throughput_tokens_s"],
         "peak_rss_mb": BITNET_PAPER["peak_rss_mb"],
         "cost_per_1k_tokens": round(cost_per_1k(BITNET_PAPER["throughput_tokens_s"], hardware_rate), 6),
+        "energy_cost_per_1k_tokens": "",
         **{f: BITNET_PAPER[f] for f in ACC_FIELDS},
     })
 
     bitnet_tps, bitnet_rss = _bench_row(local_df)
     our_cost = round(cost_per_1k(bitnet_tps, hardware_rate), 6) if bitnet_tps else ""
+    bitnet_e_cost = energy_cost_per_1k(local_df, electricity_rate)
     rows.append({
         "model": "BitNet b1.58 2B4T",
         "source": "ours",
         "throughput_tokens_s": round(bitnet_tps, 2) if bitnet_tps is not None else "",
         "peak_rss_mb": round(bitnet_rss, 0) if bitnet_rss is not None else "",
         "cost_per_1k_tokens": our_cost,
+        "energy_cost_per_1k_tokens": round(bitnet_e_cost, 6) if bitnet_e_cost is not None else "",
         **{f: (round(local_acc[f], 2) if local_acc.get(f) is not None else "") for f in ACC_FIELDS},
     })
 
@@ -235,6 +278,7 @@ def build_comparison_df(
         "throughput_tokens_s": QWEN_PAPER["throughput_tokens_s"],
         "peak_rss_mb": QWEN_PAPER["peak_rss_mb"],
         "cost_per_1k_tokens": round(cost_per_1k(QWEN_PAPER["throughput_tokens_s"], hardware_rate), 6),
+        "energy_cost_per_1k_tokens": "",
         **{f: QWEN_PAPER[f] for f in ACC_FIELDS},
     })
 
@@ -242,12 +286,14 @@ def build_comparison_df(
     if qwen_df is not None or any(q_acc.get(f) is not None for f in ACC_FIELDS):
         q_tps, q_rss = _bench_row(qwen_df) if qwen_df is not None else (None, None)
         q_cost = round(cost_per_1k(q_tps, hardware_rate), 6) if q_tps else ""
+        q_e_cost = energy_cost_per_1k(qwen_df, electricity_rate)
         rows.append({
             "model": "Qwen2.5-1.5B-Instruct Q8_0",
             "source": "ours",
             "throughput_tokens_s": round(q_tps, 2) if q_tps is not None else "",
             "peak_rss_mb": round(q_rss, 0) if q_rss is not None else "",
             "cost_per_1k_tokens": q_cost,
+            "energy_cost_per_1k_tokens": round(q_e_cost, 6) if q_e_cost is not None else "",
             **{f: (round(q_acc[f], 2) if q_acc.get(f) is not None else "") for f in ACC_FIELDS},
         })
 
@@ -255,12 +301,14 @@ def build_comparison_df(
     if qwen_q4_df is not None or any(q4_acc.get(f) is not None for f in ACC_FIELDS):
         q4_tps, q4_rss = _bench_row(qwen_q4_df) if qwen_q4_df is not None else (None, None)
         q4_cost = round(cost_per_1k(q4_tps, hardware_rate), 6) if q4_tps else ""
+        q4_e_cost = energy_cost_per_1k(qwen_q4_df, electricity_rate)
         rows.append({
             "model": "Qwen2.5-1.5B-Instruct Q4_K_M",
             "source": "ours",
             "throughput_tokens_s": round(q4_tps, 2) if q4_tps is not None else "",
             "peak_rss_mb": round(q4_rss, 0) if q4_rss is not None else "",
             "cost_per_1k_tokens": q4_cost,
+            "energy_cost_per_1k_tokens": round(q4_e_cost, 6) if q4_e_cost is not None else "",
             **{f: (round(q4_acc[f], 2) if q4_acc.get(f) is not None else "") for f in ACC_FIELDS},
         })
 
@@ -622,19 +670,22 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
 
 
 def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None,
-                       out_dir: Path, qwen_q4_df: pd.DataFrame | None = None):
+                       out_dir: Path, qwen_q4_df: pd.DataFrame | None = None,
+                       electricity_rate: float = DEFAULT_ELECTRICITY_RATE):
     """
-    Two-panel energy + carbon footprint per 1,000 tokens at n_prompt=512, n_gen=128.
+    Three-panel energy + carbon + dollar-cost footprint per 1,000 tokens
+    at n_prompt=512, n_gen=128.
 
-      Left  panel: Wh per 1k tokens   = energy_kwh × 1e6 / (n_prompt + n_gen)
-      Right panel: gCO₂ per 1k tokens = co2_kg    × 1e6 / (n_prompt + n_gen)
+      Left:   Wh per 1k tokens     = energy_kwh × 1e6 / (n_prompt + n_gen)
+      Middle: gCO₂ per 1k tokens   = co2_kg    × 1e6 / (n_prompt + n_gen)
+      Right:  USD per 1k tokens    = energy_kwh × rate × 1000 / (n_prompt + n_gen)
 
     Carbon depends on the local grid's intensity (codecarbon resolves this from
-    geolocation at run time), so the per-region figure noted in the title is
-    not a property of the model — it's a property of where the bench ran.
+    geolocation at run time); dollar cost depends on the local electricity rate.
+    Both are properties of where the bench ran, not the model.
 
     FP16 baselines aren't shown — the paper doesn't report energy/CO₂.  Skips
-    silently if neither metrics CSV has populated energy_kwh.
+    silently if no metrics CSV has populated energy_kwh.
     """
     def per_1k(df: pd.DataFrame | None, col: str, scale: float) -> float | None:
         if df is None or col not in df.columns:
@@ -653,24 +704,27 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None,
     bitnet_gco2  = per_1k(local_df,   "co2_kg",     1_000_000)
     qwen_gco2    = per_1k(qwen_df,    "co2_kg",     1_000_000)
     qwen_q4_gco2 = per_1k(qwen_q4_df, "co2_kg",     1_000_000)
+    bitnet_usd   = energy_cost_per_1k(local_df,   electricity_rate)
+    qwen_usd     = energy_cost_per_1k(qwen_df,    electricity_rate)
+    qwen_q4_usd  = energy_cost_per_1k(qwen_q4_df, electricity_rate)
 
     if bitnet_wh is None and qwen_wh is None and qwen_q4_wh is None:
         print("Skipping energy/carbon plot: no energy_kwh data in benchmark CSVs.")
         return
 
-    rows: list[tuple[str, str, float | None, float | None]] = []
+    rows: list[tuple[str, str, float | None, float | None, float | None]] = []
     if bitnet_wh is not None:
-        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2))
+        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2, bitnet_usd))
     if qwen_wh is not None:
-        rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_COLOR, qwen_wh, qwen_gco2))
+        rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_COLOR, qwen_wh, qwen_gco2, qwen_usd))
     if qwen_q4_wh is not None:
-        rows.append(("Qwen2.5-1.5B Q4_K_M (ours)", QWEN_Q4_COLOR, qwen_q4_wh, qwen_q4_gco2))
+        rows.append(("Qwen2.5-1.5B Q4_K_M (ours)", QWEN_Q4_COLOR, qwen_q4_wh, qwen_q4_gco2, qwen_q4_usd))
 
-    fig, (ax_e, ax_c) = plt.subplots(
-        1, 2, figsize=(13, max(3.5, len(rows) * 1.2)), sharey=True
+    fig, (ax_e, ax_c, ax_d) = plt.subplots(
+        1, 3, figsize=(17, max(3.5, len(rows) * 1.2)), sharey=True
     )
 
-    def _draw_panel(ax, values: list[float | None], unit: str):
+    def _draw_panel(ax, values: list[float | None], fmt: str):
         finite = [v for v in values if v is not None]
         max_val = max(finite) if finite else 1
         for i, val in enumerate(values):
@@ -678,24 +732,28 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_df: pd.DataFrame | None,
                 ax.text(0, i, "  (no data)", va="center", fontsize=9, color="#888")
                 continue
             ax.barh(i, val, color=rows[i][1], edgecolor="#444444", linewidth=0.5)
-            ax.text(val + max_val * 0.02, i, f"{val:.2f} {unit}",
+            ax.text(val + max_val * 0.02, i, fmt.format(val),
                     va="center", fontsize=10)
-        ax.set_xlim(0, max_val * 1.25)
+        ax.set_xlim(0, max_val * 1.3)
 
     ax_e.set_yticks(range(len(rows)))
     ax_e.set_yticklabels([r[0] for r in rows])
     ax_e.invert_yaxis()
-    _draw_panel(ax_e, [r[2] for r in rows], "Wh")
-    _draw_panel(ax_c, [r[3] for r in rows], "g")
+    _draw_panel(ax_e, [r[2] for r in rows], "{:.2f} Wh")
+    _draw_panel(ax_c, [r[3] for r in rows], "{:.3f} g")
+    _draw_panel(ax_d, [r[4] for r in rows], "${:.5f}")
 
     ax_e.set_xlabel("Energy per 1,000 tokens (Wh)")
     ax_c.set_xlabel("Carbon emissions per 1,000 tokens (g CO₂)")
+    ax_d.set_xlabel(f"Energy cost per 1,000 tokens (USD @ ${electricity_rate:.2f}/kWh)")
     ax_e.set_title("Energy")
     ax_c.set_title("Carbon")
+    ax_d.set_title("Cost (electricity)")
 
     fig.suptitle(
-        "Inference Energy & Carbon Footprint per 1,000 tokens\n"
-        "(BitNet vs Qwen on CPU at n_prompt=512, n_gen=128; CO₂ uses local grid intensity from CodeCarbon)",
+        "Inference Energy, Carbon, and Cost per 1,000 tokens\n"
+        "(BitNet vs Qwen on CPU at n_prompt=512, n_gen=128; "
+        "CO₂ uses local grid intensity from CodeCarbon)",
         fontsize=11,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.94])
@@ -750,6 +808,7 @@ def main():
         local_df, local_acc, args.hardware_rate,
         qwen_df, qwen_acc,
         qwen_q4_df, qwen_q4_acc,
+        electricity_rate=args.electricity_rate,
     )
     write_comparison_csv(comparison_df, Path(args.csv))
 
@@ -763,7 +822,8 @@ def main():
                               "Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_Q4_COLOR, "qwen_q4_throughput_configs.png")
     plot_accuracy(local_acc, PLOTS_DIR, qwen_acc, qwen_q4_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
-    plot_energy_carbon(local_df, qwen_df, PLOTS_DIR, qwen_q4_df)
+    plot_energy_carbon(local_df, qwen_df, PLOTS_DIR, qwen_q4_df,
+                       electricity_rate=args.electricity_rate)
     plot_memory_accuracy(comparison_df, PLOTS_DIR)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")

@@ -266,9 +266,14 @@ from arXiv:2504.12285 Table 1), and writes:
 
 1. **`results/comparison_table.csv`** — one row per model/source, columns:
    `model, source, throughput_tokens_s, peak_rss_mb, cost_per_1k_tokens,
-   arc_easy, arc_challenge, winogrande, hellaswag, mmlu`.  Cost is computed
-   from throughput and the AWS c5.xlarge on-demand rate
-   (`$0.170/hr`, `--hardware-rate`).
+   energy_cost_per_1k_tokens, arc_easy, arc_challenge, winogrande,
+   hellaswag, mmlu`.
+   - `cost_per_1k_tokens` — AWS proxy: throughput × `--hardware-rate`
+     (default `$0.170/hr` c5.xlarge on-demand).  Available for every row.
+   - `energy_cost_per_1k_tokens` — local electricity cost from CodeCarbon's
+     measured `energy_kwh` × `--electricity-rate` (default `$0.16/kWh` US
+     residential average).  Populated only for "ours" rows; paper rows
+     leave it blank because we have no measured energy for them.
 
 2. **Plots** in `results/plots/`:
    - `throughput_comparison.png` — paper FP16 baselines + BitNet (paper/ours) + Qwen (paper/ours)
@@ -279,7 +284,8 @@ from arXiv:2504.12285 Table 1), and writes:
    - `{task}_cost_accuracy.png` for each of `arc_easy, arc_challenge, winogrande, hellaswag, mmlu`
    - `memory_accuracy_pareto.png` — memory vs **mean of 5 benchmarks**
    - `{task}_memory_accuracy.png` per task
-   - `energy_carbon_comparison.png` — Wh and gCO₂ per 1k tokens
+   - `energy_carbon_comparison.png` — three panels: Wh, gCO₂, and USD (local
+     electricity cost at `--electricity-rate`) per 1k tokens
 
    The cost– and memory–accuracy scatters share a single `_accuracy_scatter`
    helper so the hollow-vs-filled marker convention and dotted paper→ours
