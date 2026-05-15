@@ -21,11 +21,73 @@ Usage:
 
 import argparse
 import csv
+import os
 import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+# ── Pretty-printing ───────────────────────────────────────────────────────────
+
+
+def _enable_ansi_on_windows() -> None:
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            # ENABLE_VIRTUAL_TERMINAL_PROCESSING on stdout (handle -11)
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        except Exception:
+            pass
+
+
+_enable_ansi_on_windows()
+USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+WIDTH = 64
+
+
+def _c(code: str, s: str) -> str:
+    return f"\033[{code}m{s}\033[0m" if USE_COLOR else s
+
+
+def bold(s):   return _c("1",  s)
+def dim(s):    return _c("2",  s)
+def red(s):    return _c("31", s)
+def green(s):  return _c("32", s)
+def yellow(s): return _c("33", s)
+def cyan(s):   return _c("36", s)
+
+
+def heading(title: str) -> None:
+    bar = "━" * WIDTH
+    print(f"\n{cyan(bar)}")
+    print(f"  {bold(title)}")
+    print(cyan(bar))
+
+
+def subheading(title: str) -> None:
+    print(f"\n  {bold(title)}")
+    print(f"  {dim('─' * (WIDTH - 2))}")
+
+
+def kv(key: str, value: str) -> None:
+    print(f"      {dim(f'{key:<9}')} {value}")
+
+
+def skip(name: str, reason: str) -> None:
+    print(f"      {yellow('[ SKIP ]')}  {name}  {dim('(' + reason + ')')}")
+
+
+def check(name: str, condition: bool, detail: str = "") -> None:
+    mark = green("[ PASS ]") if condition else red("[ FAIL ]")
+    suffix = f"  {dim(f'({detail})')}" if detail and not condition else ""
+    print(f"      {mark}  {name}{suffix}")
+    if not condition:
+        _failures.append(name)
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
 
 _parser = argparse.ArgumentParser(description="Smoke test for inference models and Phase 4 scripts.")
 _parser.add_argument("model", nargs="?", choices=["bitnet", "qwen"], default=None,
@@ -62,21 +124,13 @@ EVAL_LIMIT        = 5       # samples per task in the smoke run
 
 # (prompt, [acceptable keywords], test label)
 INFERENCE_CASES = [
-    ("What is 2+2?",                   ["4", "four"],                                        "basic arithmetic"),
-    ("What is the capital of France?", ["Paris"],                                             "factual recall"),
+    ("What is 2+2?",                   ["4", "four"],                                           "basic arithmetic"),
+    ("What is the capital of France?", ["Paris"],                                               "factual recall"),
     ("The sky is",                     ["blue", "clear", "bright", "often", "vast", "usually"], "common sense"),
 ]
 
 _failures: list[str] = []
 _eval_server: subprocess.Popen | None = None
-
-
-def check(label: str, condition: bool, detail: str = "") -> None:
-    mark = "PASS" if condition else "FAIL"
-    suffix = f"  ({detail})" if detail and not condition else ""
-    print(f"  {mark}  {label}{suffix}")
-    if not condition:
-        _failures.append(label)
 
 
 def cost_per_1k(tps: float) -> str:
@@ -133,27 +187,26 @@ def run_model(cli: Path, model: Path, prompt: str,
 def smoke_model(name: str, cli: Path, model: Path,
                 extra_flags: list[str] | None = None) -> list[float]:
     """Run all inference test cases for one model; return list of tps values."""
-    print(f"\n{'='*60}")
-    print(f"  {name}")
-    print(f"  Model: {model.name}")
-    print(f"  CLI:   {cli.name}  ({cli.parent.parent.parent.parent.name})")
-    print(f"{'='*60}")
+    subheading(name)
+    kv("Model", model.name)
+    kv("CLI",   f"{cli.name}  {dim('(' + cli.parent.parent.parent.parent.name + ')')}")
+    kv("Pricing", f"AWS c5.xlarge  {dim('·')}  ${HARDWARE_RATE}/hr")
 
     if not model.exists():
-        print(f"  SKIP  model file not found: {model}")
+        skip(name, f"model file not found: {model}")
         _failures.append(f"{name}: model not found")
         return []
     if not cli.exists():
-        print(f"  SKIP  {cli.name} not found: {cli}")
+        skip(name, f"{cli.name} not found: {cli}")
         _failures.append(f"{name}: llama-cli not found")
         return []
 
     tps_list = []
     for prompt, keywords, label in INFERENCE_CASES:
-        print(f"\n  [{label}]")
-        print(f"  Prompt:    {prompt!r}")
+        print(f"\n    {bold(label)}")
         response, tps, rc = run_model(cli, model, prompt, extra_flags)
-        print(f"  Response:  {response!r}")
+        kv("Prompt",   repr(prompt))
+        kv("Response", repr(response))
 
         if response == "TIMEOUT":
             check(f"{label}: completed within {INFERENCE_TIMEOUT}s", False, "TIMEOUT")
@@ -161,18 +214,18 @@ def smoke_model(name: str, cli: Path, model: Path,
 
         hit = any(kw.lower() in response.lower() for kw in keywords)
         expected_str = " or ".join(repr(k) for k in keywords)
-        check(f"{label}: response contains {expected_str}", hit)
+        check(f"response contains {expected_str}", hit)
 
         if tps is not None:
             tps_list.append(tps)
-            print(f"  Speed:     {tps:.1f} tok/s   ->{cost_per_1k(tps)} / 1k tokens"
-                  f"  (AWS c5.xlarge @ ${HARDWARE_RATE}/hr)")
+            kv("Speed", f"{tps:5.1f} tok/s   {dim('·')}   {cost_per_1k(tps)} / 1k tokens")
         else:
             check(f"{label}: llama-cli exited cleanly", rc == 0, f"exit code {rc}")
 
     if tps_list:
         avg = sum(tps_list) / len(tps_list)
-        print(f"\n  Average:   {avg:.1f} tok/s   ->{cost_per_1k(avg)} / 1k tokens")
+        print()
+        kv("Average", f"{bold(f'{avg:5.1f} tok/s')}   {dim('·')}   {bold(cost_per_1k(avg))} / 1k tokens")
 
     return tps_list
 
@@ -211,9 +264,7 @@ def _stop_eval_server():
 
 # ── Inference smoke tests ─────────────────────────────────────────────────────
 
-print("\n" + "="*60)
-print("  Model Inference Smoke Tests")
-print("="*60)
+heading("Model Inference Smoke Tests")
 
 # BitNet's llama.cpp fork is non-interactive by default: exits after -n tokens.
 # Qwen's upstream llama.cpp defaults to interactive conversation mode and ignores
@@ -227,19 +278,16 @@ qwen_tps   = smoke_model("Qwen2.5-1.5B-Instruct Q8_0", QWEN_CLI,   QWEN_MODEL, [
 if bitnet_tps and qwen_tps:
     b_avg = sum(bitnet_tps) / len(bitnet_tps)
     q_avg = sum(qwen_tps)   / len(qwen_tps)
-    print(f"\n{'='*60}")
-    print(f"  Cost comparison  (AWS c5.xlarge @ ${HARDWARE_RATE}/hr)")
-    print(f"  {'Model':<35} {'tok/s':>8}  {'$/1k tokens':>13}")
-    print(f"  {'-'*58}")
-    print(f"  {'BitNet b1.58 2B4T':<35} {b_avg:>8.1f}  {cost_per_1k(b_avg):>13}")
-    print(f"  {'Qwen2.5-1.5B-Instruct Q8_0':<35} {q_avg:>8.1f}  {cost_per_1k(q_avg):>13}")
-    print("="*60)
+    heading(f"Cost Comparison  {dim(f'(AWS c5.xlarge @ ${HARDWARE_RATE}/hr)')}")
+    hdr = f"{'Model':<35} {'tok/s':>8}   {'$/1k tokens':>13}"
+    print(f"  {bold(hdr)}")
+    print(f"  {dim('─' * (WIDTH - 2))}")
+    print(f"  {'BitNet b1.58 2B4T':<35} {b_avg:>8.1f}   {cost_per_1k(b_avg):>13}")
+    print(f"  {'Qwen2.5-1.5B-Instruct Q8_0':<35} {q_avg:>8.1f}   {cost_per_1k(q_avg):>13}")
 
 # ── compare_runs.py ───────────────────────────────────────────────────────────
 
-print(f"\n{'='*60}")
-print("  compare_runs.py")
-print(f"{'='*60}")
+heading("compare_runs.py")
 
 
 def run_script(*cmd: str) -> subprocess.CompletedProcess:
@@ -283,9 +331,7 @@ if csv_path.exists():
 
 # ── metrics_tracker.py ────────────────────────────────────────────────────────
 
-print(f"\n{'='*60}")
-print("  metrics_tracker.py")
-print(f"{'='*60}")
+heading("metrics_tracker.py")
 
 result = run_script(str(SCRIPTS / "metrics_tracker.py"), "--help")
 check("--help exits 0", result.returncode == 0, result.stderr.strip())
@@ -293,19 +339,15 @@ check("--no-energy flag present", "--no-energy" in result.stdout)
 
 # ── eval_accuracy.py ──────────────────────────────────────────────────────────
 
-print(f"\n{'='*60}")
-print("  eval_accuracy.py")
-print(f"{'='*60}")
+heading("eval_accuracy.py")
 
 result = run_script(str(SCRIPTS / "eval_accuracy.py"), "--help")
 check("--help exits 0", result.returncode == 0, result.stderr.strip())
 check("--task flag present", "--task" in result.stdout)
 
-# ── eval_accuracy.py: accuracy smoke (1 sample per task) ─────────────────────
+# ── eval_accuracy.py: accuracy smoke (5 samples per task) ────────────────────
 
-print(f"\n{'='*60}")
-print("  eval_accuracy.py: accuracy smoke  (mmlu / arc_easy / hellaswag, 1 sample)")
-print(f"{'='*60}")
+heading(f"eval_accuracy.py: Accuracy Smoke  {dim(f'(mmlu / arc_easy / arc_challenge / hellaswag, {EVAL_LIMIT} samples)')}")
 
 _eval_configs = []
 for _run_flag, _name, _server_bin, _model_path in [
@@ -315,24 +357,25 @@ for _run_flag, _name, _server_bin, _model_path in [
     if not _run_flag:
         continue
     if not _server_bin.exists():
-        print(f"  SKIP {_name}  (llama-server not found: {_server_bin})")
+        skip(_name, f"llama-server not found: {_server_bin}")
         _failures.append(f"eval accuracy smoke {_name}: llama-server not found")
     elif not _model_path.exists():
-        print(f"  SKIP {_name}  (model not found: {_model_path})")
+        skip(_name, f"model not found: {_model_path}")
         _failures.append(f"eval accuracy smoke {_name}: model not found")
     else:
         _eval_configs.append((_name, _server_bin, _model_path))
 
 for _name, _server_bin, _model_path in _eval_configs:
-    print(f"\n  {_name}")
-    print("  Starting llama-server...", end=" ", flush=True)
+    subheading(_name)
+    print(f"      {dim('Starting llama-server...')}", end=" ", flush=True)
     if not _start_eval_server(_server_bin, _model_path):
+        print()
         check(f"{_name}: llama-server started", False, "timed out after ~80s")
         continue
-    print("ready.")
+    print(green("ready."))
     EVAL_SMOKE_OUT.unlink(missing_ok=True)  # always start fresh; no stale checkpoint
     for task in ("mmlu", "arc_easy", "arc_challenge", "hellaswag"):
-        print(f"\n    [{task}]", flush=True)
+        print(f"\n    {bold(task)}", flush=True)
         extra = ["--max-subjects", "1"] if task == "mmlu" else []
         try:
             r = subprocess.run(
@@ -344,20 +387,24 @@ for _name, _server_bin, _model_path in _eval_configs:
                 stderr=subprocess.PIPE, text=True, cwd=ROOT,
                 timeout=EVAL_TIMEOUT,
             )
-            check(f"{_name} {task}: exits 0", r.returncode == 0, r.stderr.strip()[:200])
+            check(f"{task}: exits 0", r.returncode == 0, r.stderr.strip()[:200])
         except subprocess.TimeoutExpired:
-            check(f"{_name} {task}: completed within {EVAL_TIMEOUT}s", False, "TIMEOUT")
+            check(f"{task}: completed within {EVAL_TIMEOUT}s", False, "TIMEOUT")
     _stop_eval_server()
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
-print(f"\n{'='*60}")
+print()
+bar = "━" * WIDTH
 if _failures:
-    print(f"  FAILED  ({len(_failures)} check(s) failed):")
+    print(red(bar))
+    print(f"  {bold(red(f'FAILED   {len(_failures)} check(s) failed'))}")
+    print(red(bar))
     for f in _failures:
-        print(f"    - {f}")
-    print("="*60)
+        print(f"    {red('•')} {f}")
+    print(red(bar))
     sys.exit(1)
 else:
-    print("  All checks passed.")
-    print("="*60)
+    print(green(bar))
+    print(f"  {bold(green('PASSED   all checks succeeded'))}")
+    print(green(bar))
