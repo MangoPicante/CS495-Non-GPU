@@ -24,7 +24,8 @@ are in `PLAN.md`; model cards are in `BITNET_SUMMARY.md` and
 |---|---:|---:|
 | Throughput | **21.2 tok/s** | 15.1 tok/s |
 | Peak RSS | **1,247 MB** | 1,667 MB |
-| Cost (c5.xlarge @ $0.170/hr) | **$0.00223 / 1k tok** | $0.00313 / 1k tok |
+| Cost — AWS c5.xlarge proxy @ $0.170/hr | **$0.00223 / 1k tok** | $0.00313 / 1k tok |
+| Cost — local electricity @ $0.16/kWh | **$0.000131 / 1k tok** | $0.000224 / 1k tok |
 | Mean accuracy (5 tasks) | 61.74% | 61.10% |
 | ARC-Easy | 74.2% | 74.2% |
 | ARC-Challenge | **46.0%** | 44.2% |
@@ -62,9 +63,24 @@ out the points needed to interpret the dashboard below.
   letter scoring with 5-shot prompts (MMLU). The bias-trick path is used
   on upstream Qwen; a top-K=5000 fallback is used on the BitNet fork
   (see `QWEN_SUMMARY.md` §6.1).
-- **Cost proxy** — `cost_per_1k_tokens = (1000 / throughput / 3600) × hardware_rate`.
-  Default rate `$0.170/hr` (AWS c5.xlarge on-demand, us-east-1, 4 vCPUs,
-  retrieved 2026-05-08). Override with `--hardware-rate`.
+- **Cost framings** — two parallel columns in `comparison_table.csv`,
+  answering different questions:
+  - `cost_per_1k_tokens = (1000 / throughput / 3600) × hardware_rate`.
+    Default rate `$0.170/hr` (AWS c5.xlarge on-demand, us-east-1, 4 vCPUs,
+    retrieved 2026-05-08). Override with `--hardware-rate`. Available for
+    every row including paper FP16 baselines (the paper reports
+    throughput, so this can be computed). Answers: *"what would this cost
+    to rent in the cloud?"*
+  - `energy_cost_per_1k_tokens = (energy_kwh × 1000 / (n_prompt + n_gen))
+    × electricity_rate`. Default rate `$0.16/kWh` (US residential average).
+    Override with `--electricity-rate`. Populated only for "ours" rows
+    where we have CodeCarbon measurements; the paper doesn't report
+    energy for FP16 baselines. Answers: *"what's the marginal electricity
+    cost on hardware I already own?"*
+- **Cloud API pricing** — `CLOUD_API_PRICING` in `compare_runs.py`,
+  hardcoded as of 2026-05-15 from each provider's public pricing page.
+  Used only by §3.9 (`cloud_cost_comparison.png`); §3.5 and §5.3 still
+  use the AWS proxy and local-electricity framings.
 - **Paper FP16 baselines** are pasted directly from arXiv:2504.12285
   Table 1; they were measured on a single x86 CPU core at the same
   `(512, 128)` condition.
@@ -154,21 +170,75 @@ The per-task split between BitNet and Qwen:
 - **ARC-Easy / HellaSwag:** statistical tie.
 - **ARC-Challenge:** BitNet +1.8pt.
 
-### 3.8 Energy & Carbon
+### 3.8 Energy, Carbon, and Local Electricity Cost
 
-![Energy & carbon per 1k tokens](results/plots/energy_carbon_comparison.png)
+![Energy / Carbon / Cost per 1k tokens](results/plots/energy_carbon_comparison.png)
 
 At `(n_prompt=512, n_gen=128)`:
 
-| Model | Wh / 1k tok | g CO₂ / 1k tok |
-|---|---:|---:|
-| BitNet b1.58 2B4T (ours) | 0.82 | 0.069 |
-| Qwen2.5-1.5B Q8_0 (ours) | 1.40 | 0.119 |
+| Model | Wh / 1k tok | g CO₂ / 1k tok | $ / 1k tok @ $0.16/kWh |
+|---|---:|---:|---:|
+| BitNet b1.58 2B4T (ours) | 0.82 | 0.069 | $0.000131 |
+| Qwen2.5-1.5B Q8_0 (ours) | 1.40 | 0.119 | $0.000224 |
 
 BitNet uses ~41% less energy per 1k tokens than Qwen under our
-CodeCarbon-based measurement. CO₂ figures use the local grid's intensity
-as resolved by CodeCarbon at run time; absolute values are not portable
-across regions, but the ratio is.
+CodeCarbon-based measurement, and the dollar-cost gap follows the same
+ratio. CO₂ figures use the local grid's intensity as resolved by
+CodeCarbon at run time; the electricity-cost column uses the default
+`$0.16/kWh` (US residential average) — override with `--electricity-rate`
+for industrial / local utility rates. Absolute values are not portable
+across regions, but the BitNet-vs-Qwen ratio is.
+
+This electricity-cost framing is roughly **17× cheaper** than the AWS
+c5.xlarge proxy used elsewhere in the report. They answer different
+questions — see §2 Methodology and §3.9 for the framing comparison.
+
+### 3.9 Cost vs Cloud API Services
+
+![Self-hosted vs cloud API cost per 1k output tokens](results/plots/cloud_cost_comparison.png)
+
+Cloud API output-token pricing as of **2026-05-15** (hardcoded in
+`compare_runs.py:CLOUD_API_PRICING` — re-verify before publication, these
+change):
+
+| Service / Tier | $/1k output tokens |
+|---|---:|
+| OpenAI GPT-4o mini | $0.000600 |
+| Anthropic Claude Haiku 4.5 | $0.005000 |
+| OpenAI GPT-4o | $0.010000 |
+| Anthropic Claude Sonnet 4.5 | $0.015000 |
+| Anthropic Claude Opus 4.7 | $0.075000 |
+
+Combined ranking, ascending cost:
+
+| Rank | Option | $/1k tok | Multiplier vs cheapest |
+|---|---|---:|---:|
+| 1 | BitNet (ours, local electricity) | $0.000131 | 1.0× |
+| 2 | Qwen Q8_0 (ours, local electricity) | $0.000224 | 1.7× |
+| 3 | OpenAI GPT-4o mini (API) | $0.000600 | 4.6× |
+| 4 | BitNet (ours, AWS c5.xlarge proxy) | $0.002227 | 17× |
+| 5 | Qwen Q8_0 (ours, AWS proxy) | $0.003128 | 24× |
+| 6 | Anthropic Claude Haiku 4.5 (API) | $0.005000 | 38× |
+| 7 | OpenAI GPT-4o (API) | $0.010000 | 76× |
+| 8 | Anthropic Claude Sonnet 4.5 (API) | $0.015000 | 115× |
+| 9 | Anthropic Claude Opus 4.7 (API) | $0.075000 | **573×** |
+
+**Two ways to read this**:
+
+- *Hardware you already own* → local-electricity is the relevant framing.
+  BitNet at $0.000131/1k tokens is 4.6× cheaper than the cheapest cloud
+  API tier (GPT-4o mini) and 573× cheaper than Claude Opus 4.7.
+- *Cloud-rented infrastructure* → AWS proxy is the relevant framing.
+  Even there, self-hosted BitNet beats every API tier except GPT-4o mini.
+
+**Important caveat**: this comparison is dollars per token only. It does
+not capture capability differences. Opus 4.7 and GPT-4o can perform
+tasks that BitNet 2B and Qwen 1.5B cannot, regardless of price. The cost
+comparison is meaningful only for workloads where a 2B-parameter model's
+quality is sufficient — short summarization, simple Q&A, structured
+extraction, classification, embedding-equivalent text generation. For
+agentic / multi-step reasoning or knowledge-heavy QA, capability bypass
+invalidates the cost comparison.
 
 ---
 
@@ -271,11 +341,29 @@ workloads (factual QA, domain Q&A).
 ### 5.3 Cost implications at scale
 
 At 1 billion generated tokens/day:
-- BitNet: `1e6 × $0.00223 = $2,230/day` (on c5.xlarge)
-- Qwen: `1e6 × $0.00313 = $3,130/day`
-- Annualized delta: **~$329k/year** in BitNet's favor for the same
-  generation volume.
 
+| Option | $/day | $/year |
+|---|---:|---:|
+| BitNet (ours, local electricity) | $131 | $48k |
+| Qwen Q8_0 (ours, local electricity) | $224 | $82k |
+| OpenAI GPT-4o mini (API) | $600 | $219k |
+| BitNet (ours, AWS c5.xlarge proxy) | $2,227 | $813k |
+| Qwen Q8_0 (ours, AWS proxy) | $3,128 | $1.14M |
+| Anthropic Claude Haiku 4.5 (API) | $5,000 | $1.83M |
+| OpenAI GPT-4o (API) | $10,000 | $3.65M |
+| Anthropic Claude Sonnet 4.5 (API) | $15,000 | $5.48M |
+| Anthropic Claude Opus 4.7 (API) | $75,000 | **$27.4M** |
+
+The cost gradient is dramatic at production scale.  The numbers assume
+sustained 100% utilization (1B tokens/day ≈ 11.6k tok/s, far above what a
+single c5.xlarge produces — would require ~550 parallel BitNet instances
+or equivalent infrastructure).  At lower utilization the AWS-proxy
+numbers overstate actual cost (you'd pay only for time used, not 24/7),
+while local-electricity and per-token API numbers remain accurate
+because both scale linearly with usage.
+
+BitNet vs Qwen Q8_0 within the same framing: ~30% cheaper for BitNet
+(~$48k vs $82k/yr local electricity, ~$813k vs $1.14M/yr AWS proxy).
 Operationally meaningful at any production scale, even with the smaller
 energy ratio from §4.
 
@@ -307,12 +395,33 @@ energy ratio from §4.
    marginal-inference figures. Use the BitNet-vs-Qwen ratio (~1.5–1.7×),
    not the absolute J/tok.
 
-5. **Hardware-rate sensitivity.** All cost figures use AWS c5.xlarge
-   on-demand at `$0.170/hr`. Spot pricing (~30–40% lower), ARM Graviton
-   (lower $/hr, slower TL2 paths), or local hardware ($0/hr capex
-   amortized) would shift the absolute cost numbers, though the
+5. **Hardware-rate sensitivity.** All AWS-proxy cost figures use AWS
+   c5.xlarge on-demand at `$0.170/hr`. Spot pricing (~30–40% lower), ARM
+   Graviton (lower $/hr, slower TL2 paths), or local hardware ($0/hr
+   capex amortized) would shift the absolute cost numbers, though the
    BitNet < Qwen < FP16 ordering is robust as long as the same rate is
-   applied to all rows. A Phase-5 sweep is planned.
+   applied to all rows. The local-electricity framing has its own
+   sensitivity: `$0.16/kWh` is US residential average; California
+   residential is ~$0.27/kWh, industrial is ~$0.10/kWh, EU varies
+   $0.20–$0.40/kWh. Override with `--electricity-rate`. A Phase-5
+   sensitivity sweep across both rates is planned.
+
+6. **Cloud API pricing freshness.** The cost-vs-cloud comparison in §3.9
+   and §5.3 uses API output-token prices hardcoded in
+   `compare_runs.py:CLOUD_API_PRICING` (dated 2026-05-15). Cloud
+   providers change pricing periodically; verify against each provider's
+   pricing page (openai.com/api/pricing, anthropic.com/pricing#api)
+   before relying on §3.9 / §5.3 numbers for external publication. A
+   30% provider price drop wouldn't change the qualitative ranking but
+   would compress the multipliers.
+
+7. **Capability mismatch in the API comparison.** The §3.9 ranking is
+   dollars-per-token only; it doesn't reflect capability. Opus 4.7 and
+   GPT-4o do things BitNet 2B and Qwen 1.5B can't. The comparison is
+   meaningful for workloads where a 2B-parameter model's quality is
+   sufficient (summarization, classification, structured extraction,
+   simple Q&A) but invalidated by capability bypass for agentic / multi-
+   step reasoning or knowledge-heavy QA.
 
 ---
 
@@ -341,9 +450,19 @@ reasoning/knowledge axis. WinoGrande favors BitNet by +9.4pt; MMLU favors
 Qwen by +7.6pt. The mean is a tie. Workload-aware model selection is the
 operationally correct framing — neither model is uniformly better.
 
+**Cost comparison extended in three directions:** beyond the AWS c5.xlarge
+proxy used in §3.5, we now also report (a) the marginal local-electricity
+cost (§3.8) — 17× cheaper than the cloud-rental framing — and (b) the
+full ranking against five commercial LLM API tiers (§3.9). Self-hosted
+BitNet at local-electricity rates is 4.6× cheaper than the cheapest API
+tier and 573× cheaper than Claude Opus 4.7, with the strong caveat that
+this comparison only holds when a 2B-parameter model's capability is
+sufficient for the task.
+
 Phase 5 follow-up work (`PLAN.md`) is the writeup, the inference-side
 optimization sweep, workload-shape characterization across the three
-benchmarked configs, and the hardware-rate cost sensitivity sweep.
+benchmarked configs, and the hardware-rate / electricity-rate cost
+sensitivity sweep.
 
 ---
 

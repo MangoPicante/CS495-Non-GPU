@@ -109,12 +109,23 @@ QWEN_COLOR      = "#55A868"
 QWEN_Q4_COLOR   = "#8172B2"
 CLOUD_API_COLOR = "#7F7F7F"
 
-# Cloud API output-token pricing as of 2026-05-15 ($/1M output tokens).
-# Verify against each provider's pricing page before publication — these
-# change.  Output pricing is used because our throughput metric is for
-# generated tokens; input pricing is typically much lower.
+# ─────────────────────────────────────────────────────────────────────────────
+# Cloud API output-token pricing
+# ─────────────────────────────────────────────────────────────────────────────
+# These prices are HARDCODED as of CLOUD_API_PRICING_DATE.  Cloud providers
+# change pricing periodically; re-verify against each provider's pricing page
+# before quoting these numbers in FINAL_REPORT.md or any external artifact.
+# Bump CLOUD_API_PRICING_DATE whenever you refresh the dict so the plot title
+# and stdout note stay accurate.
+#
+# Quoted in $ per 1 million OUTPUT tokens.  Output pricing is what's directly
+# comparable to our self-hosted throughput metric (which measures generated
+# tokens); input pricing is typically much lower.
+#
 #   OpenAI:     https://openai.com/api/pricing
 #   Anthropic:  https://www.anthropic.com/pricing#api
+# ─────────────────────────────────────────────────────────────────────────────
+CLOUD_API_PRICING_DATE = "2026-05-15"
 CLOUD_API_PRICING = {
     "OpenAI GPT-4o mini":          0.60,
     "Anthropic Claude Haiku 4.5":  5.00,
@@ -845,7 +856,7 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
     ax.set_title(
         "Cost: Self-hosted (BitNet / Qwen) vs Cloud API Services\n"
         f"(AWS c5.xlarge @ \\${hardware_rate:.3f}/hr · electricity @ \\${electricity_rate:.2f}/kWh"
-        f" · API pricing per provider, retrieved 2026-05-15)"
+        f" · API pricing per provider, retrieved {CLOUD_API_PRICING_DATE})"
     )
 
     from matplotlib.patches import Patch
@@ -885,6 +896,8 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"Saved {path}")
+    print(f"  Note: Cloud API prices hardcoded as of {CLOUD_API_PRICING_DATE}; "
+          f"verify before publication (compare_runs.py:CLOUD_API_PRICING).")
 
 
 def plot_memory_accuracy(df: pd.DataFrame, out_dir: Path):
