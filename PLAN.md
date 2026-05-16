@@ -157,6 +157,10 @@ make benchmark-bitnet         # → results/bitnet_step_metrics.csv
 make benchmark-qwen           # → results/qwen_step_metrics.csv      (Qwen Q8_0)
 make benchmark-qwen-q4        # → results/qwen_q4_step_metrics.csv   (Qwen Q4_K_M)
 make benchmark                # All three
+
+# Cross-stack sensitivity check (FINAL_REPORT §6.8):
+make benchmark-qwen-on-bitnet-fork  # Qwen Q8_0 against BitNet's older llama.cpp
+                                    # → results/qwen_on_bitnet_fork_step_metrics.csv
 ```
 
 Each benchmark runs `llama-bench` over the three `(n_prompt, n_gen)` configs

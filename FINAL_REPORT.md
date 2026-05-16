@@ -124,8 +124,11 @@ The unified plot has two panels:
   bound CPU matmul (which is the regime at this parameter scale on a
   consumer CPU), that's nearly the full story for the speedup.  The
   upstream `llama.cpp` version delta vs the paper's build is small by
-  comparison and not the primary explanation.  The apples-to-apples
-  ours-vs-ours ranking is **Q4 (24.9) > BitNet (21.2) > Q8 (15.1)**.
+  comparison and not the primary explanation — the cross-stack
+  sensitivity check in §6.8 confirms this empirically (≤5% delta at the
+  reference config when Qwen Q8 is re-run against the older BitNet
+  fork).  The apples-to-apples ours-vs-ours ranking is **Q4 (24.9) >
+  BitNet (21.2) > Q8 (15.1)**.
 - **Panel (b)** — workload-shape sensitivity across the three configs for
   our three locally measured models. See §3.4 for the detailed numbers
   and the kernel/quantization attribution discussion.
@@ -540,6 +543,32 @@ BitNet earns its keep.
    sufficient (summarization, classification, structured extraction,
    simple Q&A) but invalidated by capability bypass for agentic / multi-
    step reasoning or knowledge-heavy QA.
+
+8. **Cross-stack asymmetry (sensitivity-checked).** BitNet runs on
+   `microsoft/BitNet`'s llama.cpp fork while both Qwen variants run on
+   upstream `ggml-org/llama.cpp`.  This is deliberate: BitNet's `i2_s`
+   format and TL2 kernel only exist in the fork, and forcing Qwen onto
+   the older fork would understate its production-realistic throughput.
+   To check whether the cross-stack comparison is materially confounded
+   by stack-version differences, we re-ran Qwen Q8_0 against the BitNet
+   fork's `llama-bench` (`make benchmark-qwen-on-bitnet-fork` →
+   `results/qwen_on_bitnet_fork_step_metrics.csv`):
+
+   | Config | Qwen Q8 on upstream | Qwen Q8 on BitNet fork | Δ |
+   |---|---:|---:|---:|
+   | `(512, 128)` | 15.1 tok/s | 14.4 tok/s | −4.6% |
+   | `(512, 512)` | 15.0 tok/s | 15.4 tok/s | +2.7% |
+   | `(1, 512)`   | 14.3 tok/s | 16.0 tok/s | +11.9% |
+
+   Stack version explains ≤5% at the reference config and the sign of
+   the delta isn't even consistent across configs — sub-noise for the
+   purpose of this report.  The BitNet (21.2) vs Qwen Q8 (15.1)
+   throughput gap in §3.2 is therefore robust to the choice of llama.cpp
+   build, and the attribution to quantization (Q8 ≈ ½ FP16 weight
+   bandwidth, Q4 ≈ ¼) in §3.2 holds independently of the stack pairing.
+   We did not re-run Q4_K_M against the BitNet fork because the Q8
+   result already isolates the stack variable; the Q4 quantization
+   advantage is orthogonal.
 
 ---
 

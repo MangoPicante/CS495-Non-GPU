@@ -41,6 +41,7 @@ QWEN_Q4_MODEL      ?= $(QWEN_DIR)/$(QWEN_Q4_FILE)
         qwen-setup qwen-clone qwen-build qwen-model qwen-verify qwen-clean \
         qwen-q4-model qwen-q4-verify \
         benchmark-bitnet benchmark-qwen benchmark-qwen-q4 benchmark \
+        benchmark-qwen-on-bitnet-fork \
         plots smoke-test smoke-test-bitnet smoke-test-qwen smoke-test-qwen-q4 \
         eval-arc-easy-bitnet eval-arc-easy-qwen eval-arc-easy-qwen-q4 eval-arc-easy \
         eval-arc-challenge-bitnet eval-arc-challenge-qwen eval-arc-challenge-qwen-q4 eval-arc-challenge \
@@ -290,6 +291,21 @@ benchmark-qwen-q4:
 		--threads $(THREADS)
 
 benchmark: benchmark-bitnet benchmark-qwen benchmark-qwen-q4
+
+# Sensitivity check (FINAL_REPORT §6.8): run Qwen Q8_0 against BitNet's
+# llama.cpp fork instead of upstream.  Isolates how much of Qwen's measured
+# throughput is attributable to upstream's ~1 year of optimization vs the
+# quantization itself.  The TL2 ternary kernel only activates for i2_s
+# weights, so Qwen runs through the fork's standard Q8_0 kernels (older
+# llama.cpp), not the BitNet-specific path.
+QWEN_ON_BITNET_FORK_OUT ?= results/qwen_on_bitnet_fork_step_metrics.csv
+
+benchmark-qwen-on-bitnet-fork:
+	$(POETRY) run python scripts/metrics_tracker.py \
+		--llama-dir $(BITNET_DIR) \
+		--model $(QWEN_MODEL) \
+		--out $(QWEN_ON_BITNET_FORK_OUT) \
+		--threads $(THREADS)
 
 BITNET_ACC_OUT  ?= results/accuracy_results_bitnet.json
 QWEN_ACC_OUT    ?= results/accuracy_results_qwen.json
