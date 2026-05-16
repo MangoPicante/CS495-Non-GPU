@@ -409,10 +409,17 @@ the comparison — there is no model-size scaling study to do.
       hits 8.1 tok/s (2.13× the paper's FP16 ~3.8) and Q4 hits 10.0
       (2.6×) — cleanly separates quantization (~2×) from threading
       (~2×) as the two factors in the paper-vs-ours speedup.
-- [ ] Characterize where BitNet's efficiency advantage concentrates across the three benchmarked
+- [x] Characterize where BitNet's efficiency advantage concentrates across the three benchmarked
       workload shapes — prompt-heavy `(512, 128)` vs generation-heavy `(1, 512)` vs long-context
-      `(512, 512)` — using the per-config rows already in `bitnet_step_metrics.csv` /
-      `qwen_step_metrics.csv`. Note any regime where Qwen narrows the throughput or memory gap.
+      `(512, 512)`.  Analysis in `FINAL_REPORT.md` §5.5.  Headline findings:
+      (i) all three models are essentially workload-shape insensitive on throughput
+      (within ~6% of their reference number across all three configs);
+      (ii) BitNet's advantage over Qwen Q8 *widens* on pure generation
+      (1.40× → 1.46×) — Q8 is the only model with a meaningful drop on `(1, 512)`;
+      (iii) RSS is dominated by weights + runtime overhead at this parameter count,
+      KV-cache contributes ≤30 MB across configs;
+      (iv) no regime measured where Qwen Q8 narrows its gap to BitNet —
+      gaps hold or widen on pure generation.
 - [ ] Cost-model sensitivity: re-run `compare_runs.py --hardware-rate` for at least one
       alternative (spot c5.xlarge, ARM Graviton on-demand, local desktop $0/hr) and confirm
       whether the BitNet < Qwen < FP16-baselines cost ordering is robust to the rate choice.

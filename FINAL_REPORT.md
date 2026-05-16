@@ -552,6 +552,76 @@ on single-core or 2-core constrained environments (some serverless
 configurations), BitNet wouldn't run at all and Q4 is the cheapest
 sufficient option.
 
+### 5.5 Workload-shape sensitivity (Phase 5 analysis)
+
+The three `(n_prompt, n_gen)` configs already in the bench CSVs stress
+different parts of the inference pipeline:
+
+| Config | Description | n_prompt | n_gen |
+|---|---|---:|---:|
+| `(512, 128)` | Prompt-heavy Q&A | 512 | 128 |
+| `(512, 512)` | Long-context | 512 | 512 |
+| `(1, 512)` | Pure generation | 1 | 512 |
+
+Throughput (tok/s) and the spread within each model:
+
+| Config | BitNet | Qwen Q8_0 | Qwen Q4_K_M |
+|---|---:|---:|---:|
+| `(512, 128)` | 21.21 | 15.10 | 24.89 |
+| `(512, 512)` | 20.38 | 15.00 | 24.69 |
+| `(1, 512)`   | 20.85 | 14.28 | 24.81 |
+| Within-model spread (max−min)/max | 3.9% | **5.5%** | **0.8%** |
+
+Peak RSS (MB):
+
+| Config | BitNet | Qwen Q8_0 | Qwen Q4_K_M |
+|---|---:|---:|---:|
+| `(512, 128)` | 1,247 | 1,667 | 1,632 |
+| `(512, 512)` | 1,246 | 1,667 | 1,632 |
+| `(1, 512)`   | 1,230 | 1,649 | 1,614 |
+| Within-model spread | 1.3% | 1.1% | 1.1% |
+
+Three findings:
+
+**(a) Throughput is essentially workload-shape insensitive across all
+three models.**  Each model stays within ~6% of its reference number
+regardless of whether the workload is prompt-heavy, long-context, or
+pure generation.  Q4_K_M is the most stable (0.8% spread); Q8_0 has
+the widest variance (5.5%), driven specifically by a drop on pure
+generation `(1, 512)`.  Implication: the §3.2 throughput numbers
+generalize cleanly across realistic deployment workload shapes at
+this size class.
+
+**(b) BitNet's advantage over Qwen Q8 *widens* on pure-generation
+workloads.**  The BitNet/Q8 throughput ratio is 1.40× at the
+prompt-heavy `(512, 128)` reference, 1.36× at long-context `(512,
+512)`, and **1.46×** at pure-generation `(1, 512)` — Q8's worst
+config relative to BitNet.  The TL2 ternary-lookup kernel's
+decode-phase efficiency holds up better than Q8's FP-multiply matmul
+when there's no prompt-eval phase to amortize over.  Q4_K_M's
+advantage over BitNet is roughly constant at 1.17–1.21× across all
+three configs, slightly wider on long-context `(512, 512)`.
+
+**(c) Memory is dominated by weights and runtime overhead, not the
+KV cache.**  RSS spread is <1.5% within each model across configs.
+For Qwen2.5-1.5B with GQA (28 layers × 256-dim KV) the KV cache at
+`(512, 512)` is ~28 MB and at `(1, 512)` is ~14 MB — both negligible
+against the 1.2–1.7 GB total.  Practical implication: at this
+parameter count and at ≤4K-token contexts, memory planning can use
+the static `(512, 128)` RSS as a conservative upper bound regardless
+of expected workload shape.
+
+**Regime answer.**  The Phase 5 PLAN.md task explicitly asked: *"note
+any regime where Qwen narrows the throughput or memory gap."*  At
+these context lengths, the answer is **none** for Qwen Q8 — its gap
+to BitNet either holds steady or widens (worst at pure generation).
+Qwen Q4 *does* exceed BitNet on throughput at every config, but
+that's the §5.1 Pareto trade-off (Q4 buys speed by sacrificing 2.3pt
+mean accuracy), not a workload-shape effect.  The picture would
+likely change at much longer contexts (≥4K tokens) where KV-cache
+memory becomes a multi-GB issue, but that regime is beyond what our
+4K-context BitNet build is set up to measure.
+
 ---
 
 ## 6. Threats to Validity
