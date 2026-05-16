@@ -421,6 +421,10 @@ the comparison — there is no model-size scaling study to do.
       section (single-CPU run, the logit-bias asymmetry between upstream and BitNet's fork,
       0-shot vs paper's 5-shot MMLU framing, hardware-rate sensitivity).
 - [ ] Prepare final presentation slides in `presentation.pptx`.
-- [ ] Clean up repository for reproducibility — `README.md` still references the obsolete
-      `scripts/run_lm_eval.py` and should be aligned with the current `eval_accuracy.py` /
-      `metrics_tracker.py` Makefile entry points.
+- [x] Clean up repository for reproducibility — `README.md` rewritten as
+      an inference-benchmarking front-door (was previously stuck describing
+      the project's pre-pivot training framing).  Now lists all three locally
+      run models, points readers at PLAN.md / FINAL_REPORT.md / the Makefile
+      for details, fixes the obsolete `scripts/run_lm_eval.py` reference, the
+      wrong remote URL, and the `pip install` instructions that predated the
+      Poetry migration.
