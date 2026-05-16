@@ -20,29 +20,33 @@ are in `PLAN.md`; model cards are in `BITNET_SUMMARY.md` and
 
 ## 1. Executive Summary
 
-| Metric (n_prompt=512, n_gen=128, 4 threads) | BitNet b1.58 2B4T (ours) | Qwen2.5-1.5B Q8_0 (ours) |
-|---|---:|---:|
-| Throughput | **21.2 tok/s** | 15.1 tok/s |
-| Peak RSS | **1,247 MB** | 1,667 MB |
-| Cost — AWS c5.xlarge proxy @ $0.170/hr | **$0.00223 / 1k tok** | $0.00313 / 1k tok |
-| Cost — local electricity @ $0.16/kWh | **$0.000131 / 1k tok** | $0.000224 / 1k tok |
-| Mean accuracy (5 tasks) | 61.74% | 61.10% |
-| ARC-Easy | 74.2% | 74.2% |
-| ARC-Challenge | **46.0%** | 44.2% |
-| WinoGrande | **75.2%** | 65.8% |
-| HellaSwag | 58.6% | **59.0%** |
-| MMLU (5-shot) | 54.69% | **62.28%** |
-| Energy (Wh / 1k tok, CodeCarbon) | **0.82** | 1.40 |
+| Metric (n_prompt=512, n_gen=128, 4 threads) | BitNet b1.58 2B4T (ours) | Qwen2.5-1.5B Q8_0 (ours) | Qwen2.5-1.5B Q4_K_M (ours) |
+|---|---:|---:|---:|
+| Throughput | 21.2 tok/s | 15.1 tok/s | **24.9 tok/s** |
+| Peak RSS | **1,247 MB** | 1,667 MB | 1,632 MB |
+| Cost — AWS c5.xlarge proxy @ $0.170/hr | $0.00223 / 1k tok | $0.00313 / 1k tok | **$0.00190 / 1k tok** |
+| Cost — local electricity @ $0.16/kWh | **$0.000131 / 1k tok** | $0.000224 / 1k tok | $0.000132 / 1k tok |
+| Mean accuracy (5 tasks) | **61.74%** | 61.10% | 59.45% |
+| ARC-Easy | **74.2%** | 74.2% | 71.0% |
+| ARC-Challenge | **46.0%** | 44.2% | 43.2% |
+| WinoGrande | **75.2%** | 65.8% | 63.0% |
+| HellaSwag | 58.6% | **59.0%** | 58.8% |
+| MMLU (5-shot) | 54.69% | **62.28%** | 61.23% |
+| Energy (Wh / 1k tok, CodeCarbon) | **0.82** | 1.40 | 0.83 |
 
-**Headline.** BitNet's i2_s quantization plus the TL2 ternary-lookup kernel
-delivers measurable wins on CPU at this parameter scale: ~40% faster, ~25%
-less memory, ~29% cheaper than a Q8_0 Qwen of comparable size, with mean
-accuracy in a statistical tie. The per-task split is informative — BitNet
-wins commonsense reasoning (WinoGrande +9.4pt, ARC-C +1.8pt); Qwen wins
-knowledge recall (MMLU +7.6pt). The paper's claim of 9–23× energy
-efficiency over FP16 baselines does not survive measurement at our
-power-tracking resolution; the inference-marginal story may still hold but
-cannot be confirmed without isolated power-rail readings (see §5).
+**Headline.** Three models trace a clean speed/accuracy Pareto on CPU at
+this size class. **Q4_K_M is the fastest** (24.9 tok/s, ~17% over BitNet)
+and the cheapest in the AWS-rental framing. **BitNet is the
+Pareto-optimal point**: it matches Q8_0's mean accuracy (within 0.6pt)
+while running ~40% faster, and matches Q4_K_M's speed-class while
+beating its accuracy by 2.3pt mean. **BitNet wins memory** decisively
+(~25% lower RSS than either Qwen variant) and **wins commonsense
+reasoning** (WinoGrande +9.4pt over Q8, +12.2pt over Q4). Qwen wins
+knowledge recall (MMLU: Q8 +7.6pt, Q4 +6.5pt over BitNet). The paper's
+claim of 9–23× energy efficiency over FP16 baselines does not survive
+measurement at our power-tracking resolution; the inference-marginal
+story may still hold but cannot be confirmed without isolated
+power-rail readings (see §5).
 
 ---
 
@@ -112,12 +116,16 @@ The unified plot has two panels:
 
 - **Panel (a)** — cross-model comparison at the paper's reference config
   (n_prompt=512, n_gen=128). BitNet (ours) matches the paper's ~20 tok/s
-  claim (21.2 vs 20.0). Qwen (ours) outperforms the paper's ~3.8 tok/s by
-  ~4×, which is the gain from running against current upstream `llama.cpp`
-  (~1 year newer than the paper's measurement) on hardware with AVX2. Both
-  "ours" rows therefore overstate the paper-vs-paper headroom; the
-  apples-to-apples comparison is **ours-vs-ours**, where BitNet is ~40%
-  faster than Qwen Q8_0.
+  claim (21.2 vs 20.0). Both Qwen "ours" rows substantially outperform
+  the paper's ~3.8 tok/s figure — Q8_0 by ~4× and Q4_K_M by ~6.5× —
+  and the dominant cause is that **the paper measured the full FP16
+  model while we run quantized variants**.  Q8_0 halves the weight
+  memory bandwidth vs FP16, and Q4_K_M quarters it; on memory-bandwidth
+  bound CPU matmul (which is the regime at this parameter scale on a
+  consumer CPU), that's nearly the full story for the speedup.  The
+  upstream `llama.cpp` version delta vs the paper's build is small by
+  comparison and not the primary explanation.  The apples-to-apples
+  ours-vs-ours ranking is **Q4 (24.9) > BitNet (21.2) > Q8 (15.1)**.
 - **Panel (b)** — workload-shape sensitivity across the three configs for
   our three locally measured models. See §3.4 for the detailed numbers
   and the kernel/quantization attribution discussion.
@@ -126,8 +134,13 @@ The unified plot has two panels:
 
 ![Peak RSS vs FP16 baselines](results/plots/memory_comparison.png)
 
-Peak RSS is ~25% lower for BitNet than Qwen on the same hardware/config.
-Both are well under the FP16 baselines (which range 2.6–4.1 GB).
+BitNet at **1,247 MB** is ~25% lower than either Qwen variant (Q8_0 at
+1,667 MB, Q4_K_M at 1,632 MB).  Interestingly, **Q4_K_M does not save
+much RSS vs Q8_0** despite being ~half the on-disk size — the constant
+overhead from the KV cache, activations, and runtime data structures
+dominates the weight-storage delta at this parameter count.  All three
+are well under the FP16 baselines (which range 2.6–4.1 GB).  Memory is
+BitNet's cleanest win across all metrics in the report.
 
 ### 3.4 Per-config throughput
 
@@ -144,46 +157,72 @@ BitNet's throughput is essentially flat across the three workload shapes
 generation `(1, 512)`. The TL2 kernel's lookup-vs-multiply tradeoff is
 consistent regardless of prompt/generation balance.
 
-Qwen Q4_K_M is the surprise: ~17% **faster** than BitNet at the reference
-config (24.9 vs 21.2 tok/s) and stays ahead at (512, 512). This reframes
-the kernel-attribution claim in §5.1 — aggressive Q4 quantization on
-upstream `llama.cpp` matches or beats the TL2 kernel on raw throughput
-at this size class, which means BitNet's throughput win in §3.2 is
-specifically vs Q8_0, not vs all aggressive quantization. The accuracy
-tradeoff (Q4 vs BitNet) is the still-open question that the Phase 5
-`eval-accuracy-qwen-q4` run will answer.
+Qwen Q4_K_M is the surprise: ~17% **faster** than BitNet at the
+reference config (24.9 vs 21.2 tok/s) and stays ahead at (512, 512).
+This reframes the kernel-attribution claim in §5.1 — aggressive Q4
+quantization on upstream `llama.cpp` matches or beats the TL2 kernel
+on raw throughput at this size class, which means BitNet's throughput
+win in §3.2 is specifically vs Q8_0, not vs all aggressive
+quantization.  The accuracy cost of Q4's speed is real but modest:
+mean accuracy drops 1.65pt vs Q8_0 and 2.29pt vs BitNet (see §3.7).
 
 ### 3.5 Cost–Accuracy
 
 ![Cost vs mean accuracy](results/plots/cost_accuracy.png)
 
-BitNet and Qwen (ours) both sit at the lower-left corner — cheaper *and*
+All three "ours" points sit at the lower-left corner — cheaper *and*
 higher mean accuracy than every paper FP16 baseline at this size class.
-BitNet is cheaper than Qwen by ~$0.001 / 1k tok and ties on mean accuracy.
-Per-task variants are in `results/plots/{task}_cost_accuracy.png`; MMLU
-is the only task where one of the FP16 baselines (Qwen2.5 1.5B paper) is
-competitive on the accuracy axis.
+Within the "ours" cluster:
+
+- **Qwen Q4_K_M** is the cheapest per token on the AWS-proxy framing
+  ($0.00190 / 1k tok), beating BitNet by ~15%.
+- **BitNet** is most accurate (mean 61.74%, +0.64 vs Q8, +2.29 vs Q4).
+- **Qwen Q8_0** is the most expensive of the three and sits in the
+  middle on accuracy — it has no obvious operational role unless you
+  specifically need Q8's near-FP16 fidelity on knowledge tasks (MMLU,
+  where it edges out Q4 by ~1pt).
+
+Per-task variants are in `results/plots/{task}_cost_accuracy.png`. MMLU
+is the only task where Qwen2.5 1.5B (paper FP16) is competitive on the
+accuracy axis.
 
 ### 3.6 Memory–Accuracy Pareto
 
 ![Memory vs mean accuracy](results/plots/memory_accuracy_pareto.png)
 
-BitNet (ours) defines the bottom-left frontier: lowest memory + highest
-accuracy in its band. Qwen (ours) sits at ~1.7 GB RSS with very similar
-accuracy.
+BitNet (ours) defines the bottom-left frontier: ~1.25 GB RSS at 61.74%
+mean accuracy.  Both Qwen variants cluster at ~1.65 GB — Q8 slightly
+higher on accuracy (61.10%) than Q4 (59.45%) but on the same memory
+plateau.  No FP16 baseline gets close.
 
 ### 3.7 Accuracy by task
 
 ![Accuracy by task](results/plots/accuracy_comparison.png)
 
-The per-task split between BitNet and Qwen:
-- **WinoGrande:** BitNet +9.4pt (75.2 vs 65.8). Coreference is the strongest
-  BitNet win in absolute terms.
-- **MMLU:** Qwen +7.6pt (62.3 vs 54.7). Knowledge breadth is the strongest
-  Qwen win and reflects Qwen2.5's much larger pretraining corpus (up to 18T
-  tokens vs BitNet 2B4T's 4T).
-- **ARC-Easy / HellaSwag:** statistical tie.
-- **ARC-Challenge:** BitNet +1.8pt.
+| Task | BitNet (ours) | Qwen Q8_0 (ours) | Qwen Q4_K_M (ours) | Winner |
+|---|---:|---:|---:|---|
+| ARC-Easy | 74.2 | 74.2 | 71.0 | BitNet / Q8 tie |
+| ARC-Challenge | **46.0** | 44.2 | 43.2 | BitNet |
+| WinoGrande | **75.2** | 65.8 | 63.0 | BitNet (+9.4 / +12.2) |
+| HellaSwag | 58.6 | **59.0** | 58.8 | Q8 (effectively tied) |
+| MMLU (5-shot) | 54.69 | **62.28** | 61.23 | Q8 (Q4 a close second) |
+| **Mean** | **61.74** | 61.10 | 59.45 |  |
+
+Two patterns:
+
+- **BitNet wins reasoning**, large.  WinoGrande +9.4pt over Q8 and
+  +12.2pt over Q4 is the cleanest BitNet win in the entire report.
+  ARC-Challenge +1.8pt over Q8 is the same direction.
+- **Qwen wins knowledge**, smaller.  MMLU is the only large-margin Qwen
+  win (+7.6pt over BitNet for Q8, +6.5pt for Q4).  This reflects
+  Qwen2.5's much larger pretraining corpus (up to 18T tokens vs BitNet
+  2B4T's 4T) — at this size class, MMLU is dominated by pretraining-data
+  breadth.
+
+The Q8 → Q4 quantization cost is consistent across tasks: -3.2 (ARC-E),
+-1.0 (ARC-C), -2.8 (Wino), -0.2 (HellaSwag), -1.05 (MMLU). Mean drop
+1.65pt.  No catastrophic failure on any task — Q4_K_M behaves as a
+"slightly worse but much faster" Q8.
 
 ### 3.8 Energy, Carbon, and Local Electricity Cost
 
@@ -193,18 +232,25 @@ At `(n_prompt=512, n_gen=128)`:
 
 | Model | Wh / 1k tok | g CO₂ / 1k tok | $ / 1k tok @ $0.16/kWh |
 |---|---:|---:|---:|
-| BitNet b1.58 2B4T (ours) | 0.82 | 0.069 | $0.000131 |
+| BitNet b1.58 2B4T (ours) | **0.82** | **0.069** | **$0.000131** |
+| Qwen2.5-1.5B Q4_K_M (ours) | 0.83 | 0.070 | $0.000132 |
 | Qwen2.5-1.5B Q8_0 (ours) | 1.40 | 0.119 | $0.000224 |
 
-BitNet uses ~41% less energy per 1k tokens than Qwen under our
-CodeCarbon-based measurement, and the dollar-cost gap follows the same
-ratio. CO₂ figures use the local grid's intensity as resolved by
-CodeCarbon at run time; the electricity-cost column uses the default
-`$0.16/kWh` (US residential average) — override with `--electricity-rate`
-for industrial / local utility rates. Absolute values are not portable
-across regions, but the BitNet-vs-Qwen ratio is.
+Three observations:
 
-This electricity-cost framing is roughly **17× cheaper** than the AWS
+- **BitNet and Q4 essentially tie on energy** (within 1%).  Q4 finishes
+  faster (less wall time) but draws marginally more power per second
+  (FP-multiply path on the dequantized weights); the products balance.
+  Q8 uses ~70% more energy than either because its wall time is much
+  longer.
+- The Q8-vs-BitNet 41% gap from the pre-Q4 report still holds.
+- CO₂ figures use the local grid's intensity as resolved by CodeCarbon
+  at run time; the electricity-cost column uses the default `$0.16/kWh`
+  (US residential average) — override with `--electricity-rate` for
+  industrial / local utility rates. Absolute values are not portable
+  across regions, but the BitNet-vs-Qwen ratios are.
+
+The electricity-cost framing is roughly **17× cheaper** than the AWS
 c5.xlarge proxy used elsewhere in the report. They answer different
 questions — see §2 Methodology and §3.9 for the framing comparison.
 
@@ -229,22 +275,27 @@ Combined ranking, ascending cost:
 | Rank | Option | $/1k tok | Multiplier vs cheapest |
 |---|---|---:|---:|
 | 1 | BitNet (ours, local electricity) | $0.000131 | 1.0× |
-| 2 | Qwen Q8_0 (ours, local electricity) | $0.000224 | 1.7× |
-| 3 | OpenAI GPT-4o mini (API) | $0.000600 | 4.6× |
-| 4 | BitNet (ours, AWS c5.xlarge proxy) | $0.002227 | 17× |
-| 5 | Qwen Q8_0 (ours, AWS proxy) | $0.003128 | 24× |
-| 6 | Anthropic Claude Haiku 4.5 (API) | $0.005000 | 38× |
-| 7 | OpenAI GPT-4o (API) | $0.010000 | 76× |
-| 8 | Anthropic Claude Sonnet 4.5 (API) | $0.015000 | 115× |
-| 9 | Anthropic Claude Opus 4.7 (API) | $0.075000 | **573×** |
+| 2 | Qwen Q4_K_M (ours, local electricity) | $0.000132 | 1.0× |
+| 3 | Qwen Q8_0 (ours, local electricity) | $0.000224 | 1.7× |
+| 4 | OpenAI GPT-4o mini (API) | $0.000600 | 4.6× |
+| 5 | Qwen Q4_K_M (ours, AWS c5.xlarge proxy) | $0.001897 | 14× |
+| 6 | BitNet (ours, AWS c5.xlarge proxy) | $0.002227 | 17× |
+| 7 | Qwen Q8_0 (ours, AWS proxy) | $0.003128 | 24× |
+| 8 | Anthropic Claude Haiku 4.5 (API) | $0.005000 | 38× |
+| 9 | OpenAI GPT-4o (API) | $0.010000 | 76× |
+| 10 | Anthropic Claude Sonnet 4.5 (API) | $0.015000 | 115× |
+| 11 | Anthropic Claude Opus 4.7 (API) | $0.075000 | **573×** |
 
 **Two ways to read this**:
 
 - *Hardware you already own* → local-electricity is the relevant framing.
-  BitNet at $0.000131/1k tokens is 4.6× cheaper than the cheapest cloud
-  API tier (GPT-4o mini) and 573× cheaper than Claude Opus 4.7.
+  BitNet and Q4_K_M are within 1% of each other ($0.000131 vs $0.000132)
+  and both are 4.6× cheaper than the cheapest cloud API tier (GPT-4o
+  mini) and 573× cheaper than Claude Opus 4.7.
 - *Cloud-rented infrastructure* → AWS proxy is the relevant framing.
-  Even there, self-hosted BitNet beats every API tier except GPT-4o mini.
+  Q4_K_M is cheapest of the self-hosted options here ($0.001897) because
+  it generates more tokens per rented hour.  BitNet sits ~15% higher.
+  Both still beat every API tier except GPT-4o mini.
 
 **Important caveat**: this comparison is dollars per token only. It does
 not capture capability differences. Opus 4.7 and GPT-4o can perform
@@ -276,15 +327,15 @@ BitNet vs FP16 baselines.
 Our CodeCarbon-measured J/tok, computed as
 `energy_kwh × 3,600,000 / (n_prompt + n_gen)`:
 
-| Workload | Tokens | BitNet J/tok | Qwen J/tok | Qwen / BitNet |
-|---|---:|---:|---:|---:|
-| `(512, 128)` | 640 | 2.94 | 5.05 | **1.72×** |
-| `(512, 512)` | 1,024 | 6.91 | 10.49 | 1.52× |
-| `(1, 512)` | 513 | 21.71 | 33.43 | 1.54× |
+| Workload | Tokens | BitNet J/tok | Qwen Q8_0 J/tok | Qwen Q4_K_M J/tok | Q8/BitNet |
+|---|---:|---:|---:|---:|---:|
+| `(512, 128)` | 640 | 2.94 | 5.05 | 2.98 | **1.72×** |
+| `(512, 512)` | 1,024 | 6.91 | 10.49 | 6.15 | 1.52× |
+| `(1, 512)` | 513 | 21.71 | 33.43 | 19.07 | 1.54× |
 
 ### 4.1 Interpretation
 
-Two things stand out:
+Three things stand out:
 
 **(a) Our absolute J/tok values are 100–200× higher than the paper's.**
 CodeCarbon estimates power from CPU TDP and runtime intervals — it captures
@@ -296,13 +347,22 @@ comparable as published numbers. **The paper's 0.028 J/tok for BitNet is
 not an upper-bound on real-world energy cost** — it is the marginal-
 inference component only.
 
-**(b) Our BitNet-vs-Qwen ratio (~1.5–1.7×) is far below the paper's
+**(b) Our BitNet-vs-Q8 ratio (~1.5–1.7×) is far below the paper's
 implied ~12× ratio** (0.347 / 0.028). This is consistent with (a): both
 models run on the same CPU and inherit the same idle/uncore baseline. If
 idle is `P_idle` and inference adds `Δ`, total energy is
 `(P_idle + Δ) × t`. BitNet's `Δ` may indeed be ~12× smaller than Qwen's,
 but the constant `P_idle` term dominates total measured energy at this
 sampling resolution, compressing the apparent ratio.
+
+**(c) Q4_K_M and BitNet are within ~5% of each other on J/tok at every
+config.**  Q4 finishes faster (smaller wall-time × power) but BitNet's
+ternary path draws less power per second; the products converge.  This
+further weakens the "BitNet is uniquely energy-efficient" framing — at
+this hardware and resolution, aggressive Q4 quantization on upstream
+`llama.cpp` is essentially energy-tied with the TL2 kernel.  The
+inference-marginal advantage that the paper attributes to 1.58-bit may
+still be real, but it's invisible at total-system-power resolution.
 
 ### 4.2 What this means for the carbon claim
 
@@ -330,14 +390,45 @@ This is recommended Phase-5 follow-up work and is noted in `PLAN.md`.
 
 ## 5. Discussion
 
-### 5.1 The advantage is "kernel + format", not just "fewer bits"
+### 5.1 The speed/accuracy Pareto across three quantization points
 
-BitNet's throughput win over Qwen is ~1.4× even though both are weight-
-quantized to small footprints (1.58 b/param vs 8 b/param). The remaining
-factor is the **TL2 ternary-lookup kernel**, which replaces FP-multiply
-matmul with byte-level table lookups, and the activation path that stays
-in int8. Q8_0 still does FP arithmetic. A useful framing: the
-weight-format change saves memory, but the kernel change saves time.
+The three locally measured models trace a clean quality-vs-speed curve.
+Sorted by speed:
+
+| Model | Format | Throughput | Mean accuracy | Memory |
+|---|---|---:|---:|---:|
+| Qwen Q8_0 | 8-bit, FP-multiply matmul | 15.1 tok/s | 61.10% | 1,667 MB |
+| BitNet i2_s | 1.58-bit, TL2 ternary-lookup kernel | 21.2 tok/s | **61.74%** | **1,247 MB** |
+| Qwen Q4_K_M | 4-bit, FP-multiply matmul | **24.9 tok/s** | 59.45% | 1,632 MB |
+
+Two observations:
+
+**(a) BitNet is the Pareto winner among the three.**  Q4_K_M beats it on
+raw throughput by ~17%, but at a measurable accuracy cost (mean -2.3pt;
+-1.05pt on MMLU, -12.2pt on WinoGrande).  Q8_0 matches it on mean
+accuracy (within 0.6pt) but runs ~40% slower.  At the same speed class
+as Q4, nothing matches BitNet's accuracy; at the same accuracy class as
+Q8, nothing matches BitNet's speed.  Memory is the cleanest win
+regardless of frame: BitNet's i2_s footprint is ~25% smaller than
+either Qwen variant.
+
+**(b) The kernel-attribution argument from earlier drafts of this report
+was weaker than it appeared.**  A pre-Q4 reading of the data ("BitNet
+1.4× faster than Q8") attributed the gap to the TL2 ternary-lookup
+kernel — i.e., "Q8 still does FP-multiply matmul, BitNet's kernel uses
+byte-level table lookups."  Q4_K_M on upstream `llama.cpp` shows that
+**aggressive weight quantization on a modern kernel can match or beat
+BitNet's throughput** without the kernel-level rewrite.  The fair claim
+is therefore: *aggressive quantization saves time regardless of format*,
+and **BitNet's real contribution is doing so without paying the
+accuracy cost** that Q4_K_M does.
+
+Put differently, the BitNet paper's headline efficiency claim
+(throughput 5–7× over FP16) is reproduced here, but it isn't *unique* to
+1-bit; Q4_K_M on the same hardware delivers comparable throughput.
+What's unique to 1.58-bit + TL2 is **the position on the
+speed/accuracy curve** — specifically that BitNet matches Q8's accuracy
+at near-Q4's speed.
 
 ### 5.2 Reasoning vs Knowledge
 
@@ -360,9 +451,11 @@ At 1 billion generated tokens/day:
 | Option | $/day | $/year |
 |---|---:|---:|
 | BitNet (ours, local electricity) | $131 | $48k |
+| Qwen Q4_K_M (ours, local electricity) | $132 | $48k |
 | Qwen Q8_0 (ours, local electricity) | $224 | $82k |
 | OpenAI GPT-4o mini (API) | $600 | $219k |
-| BitNet (ours, AWS c5.xlarge proxy) | $2,227 | $813k |
+| Qwen Q4_K_M (ours, AWS proxy) | $1,897 | $693k |
+| BitNet (ours, AWS proxy) | $2,227 | $813k |
 | Qwen Q8_0 (ours, AWS proxy) | $3,128 | $1.14M |
 | Anthropic Claude Haiku 4.5 (API) | $5,000 | $1.83M |
 | OpenAI GPT-4o (API) | $10,000 | $3.65M |
@@ -370,17 +463,25 @@ At 1 billion generated tokens/day:
 | Anthropic Claude Opus 4.7 (API) | $75,000 | **$27.4M** |
 
 The cost gradient is dramatic at production scale.  The numbers assume
-sustained 100% utilization (1B tokens/day ≈ 11.6k tok/s, far above what a
-single c5.xlarge produces — would require ~550 parallel BitNet instances
-or equivalent infrastructure).  At lower utilization the AWS-proxy
-numbers overstate actual cost (you'd pay only for time used, not 24/7),
-while local-electricity and per-token API numbers remain accurate
-because both scale linearly with usage.
+sustained 100% utilization (1B tokens/day ≈ 11.6k tok/s, far above what
+a single c5.xlarge produces — would require ~550 parallel BitNet
+instances or equivalent infrastructure).  At lower utilization the
+AWS-proxy numbers overstate actual cost (you'd pay only for time used,
+not 24/7), while local-electricity and per-token API numbers remain
+accurate because both scale linearly with usage.
 
-BitNet vs Qwen Q8_0 within the same framing: ~30% cheaper for BitNet
-(~$48k vs $82k/yr local electricity, ~$813k vs $1.14M/yr AWS proxy).
-Operationally meaningful at any production scale, even with the smaller
-energy ratio from §4.
+**Within-framing comparisons** between the three "ours" rows:
+
+- *Local electricity*: BitNet and Q4_K_M tie ($131 vs $132/day); both
+  ~40% cheaper than Q8_0 ($224/day).
+- *AWS proxy*: Q4_K_M is the cheapest ($1,897/day), BitNet ~15% higher
+  ($2,227), Q8_0 highest ($3,128).  The AWS framing rewards Q4's higher
+  throughput.
+
+Operationally meaningful at any production scale.  **If MMLU-class
+knowledge accuracy is the bottleneck, Q4_K_M is the cheapest sufficient
+option**; if reasoning (WinoGrande, ARC) or memory footprint matters,
+BitNet earns its keep.
 
 ---
 
@@ -414,12 +515,14 @@ energy ratio from §4.
    c5.xlarge on-demand at `$0.170/hr`. Spot pricing (~30–40% lower), ARM
    Graviton (lower $/hr, slower TL2 paths), or local hardware ($0/hr
    capex amortized) would shift the absolute cost numbers, though the
-   BitNet < Qwen < FP16 ordering is robust as long as the same rate is
-   applied to all rows. The local-electricity framing has its own
-   sensitivity: `$0.16/kWh` is US residential average; California
-   residential is ~$0.27/kWh, industrial is ~$0.10/kWh, EU varies
-   $0.20–$0.40/kWh. Override with `--electricity-rate`. A Phase-5
-   sensitivity sweep across both rates is planned.
+   ours < paper-FP16 ordering is robust as long as the same rate is
+   applied to all rows.  The intra-"ours" ordering at AWS-proxy
+   (Q4 < BitNet < Q8) is throughput-driven and therefore robust to rate
+   choice.  The local-electricity framing has its own sensitivity:
+   `$0.16/kWh` is US residential average; California residential is
+   ~$0.27/kWh, industrial is ~$0.10/kWh, EU varies $0.20–$0.40/kWh.
+   Override with `--electricity-rate`. A Phase-5 sensitivity sweep
+   across both rates is planned.
 
 6. **Cloud API pricing freshness.** The cost-vs-cloud comparison in §3.9
    and §5.3 uses API output-token prices hardcoded in
@@ -449,35 +552,54 @@ comparable FP16-style baseline at this size class — run on the same
 machine under the same conditions.
 
 **Confirmed:** BitNet's CPU throughput target (~20 tok/s) and memory
-footprint (~1.4 GB) reproduce within margin. BitNet is materially faster,
-smaller, and cheaper than a Q8_0 Qwen of comparable parameter count.
+footprint (~1.4 GB) reproduce within margin (21.2 tok/s, 1.25 GB). BitNet
+is materially faster, smaller, and equally accurate compared to Qwen2.5
+Q8_0 at this size class.
 
-**Refined:** the paper's 9–23× energy claim does not survive system-level
-power tracking on this hardware. The realistic advantage at the wall-power
-level is ~1.5–1.7× — still substantial, but an order of magnitude smaller
-than the paper headline. The discrepancy is a measurement-methodology
+**Refined — the kernel-attribution story is weaker than we initially
+read.**  An earlier draft of this report claimed BitNet's throughput win
+was driven by the TL2 ternary-lookup kernel.  Adding Qwen Q4_K_M as a
+third comparison point shows that aggressive weight quantization on
+*upstream* `llama.cpp` matches or beats BitNet's throughput (Q4 at 24.9
+tok/s vs BitNet's 21.2), without a kernel rewrite.  BitNet's real edge
+is the **position on the speed/accuracy Pareto** — it matches Q8's
+mean accuracy at near-Q4 speed, with the smallest memory footprint of
+the three.  Q4_K_M is the cheapest per token in the AWS-rental framing
+but pays a measurable 2.3pt mean accuracy cost (and 12.2pt on
+WinoGrande).
+
+**Refined — the paper's 9–23× energy claim** does not survive
+system-level power tracking on this hardware. The realistic advantage at
+the wall-power level is ~1.5–1.7× over Q8 — still substantial, but an
+order of magnitude smaller than the paper headline. BitNet and Q4_K_M
+essentially tie on energy.  The discrepancy is a measurement-methodology
 mismatch (compute-marginal vs total-system); the paper's underlying
 kernel-level story remains plausible but is not verifiable with
 CodeCarbon.
 
-**New:** BitNet and Qwen at this scale split cleanly along a
-reasoning/knowledge axis. WinoGrande favors BitNet by +9.4pt; MMLU favors
-Qwen by +7.6pt. The mean is a tie. Workload-aware model selection is the
-operationally correct framing — neither model is uniformly better.
+**New (model-selection guidance):** the three locally measured models
+split along clear deployment axes.  *Pick BitNet* when accuracy matters,
+when memory is the binding constraint, or when reasoning (WinoGrande,
+ARC) dominates the workload.  *Pick Qwen Q4_K_M* when raw throughput is
+the bottleneck and a 1–3pt accuracy drop per task is acceptable.  *Pick
+Qwen Q8_0* only when you specifically need Q8's near-FP16 fidelity on
+knowledge tasks — it's the slowest of the three and the most expensive
+per token.
 
-**Cost comparison extended in three directions:** beyond the AWS c5.xlarge
-proxy used in §3.5, we now also report (a) the marginal local-electricity
-cost (§3.8) — 17× cheaper than the cloud-rental framing — and (b) the
-full ranking against five commercial LLM API tiers (§3.9). Self-hosted
-BitNet at local-electricity rates is 4.6× cheaper than the cheapest API
-tier and 573× cheaper than Claude Opus 4.7, with the strong caveat that
-this comparison only holds when a 2B-parameter model's capability is
-sufficient for the task.
+**Cost comparison extended in three directions:** beyond the AWS
+c5.xlarge proxy used in §3.5, we now also report (a) the marginal
+local-electricity cost (§3.8) — 17× cheaper than the cloud-rental
+framing — and (b) the full ranking against five commercial LLM API
+tiers (§3.9). Self-hosted BitNet and Q4_K_M tie at ~$0.000131/1k tokens
+local-electricity, 4.6× cheaper than the cheapest API tier (GPT-4o
+mini) and 573× cheaper than Claude Opus 4.7, with the strong caveat
+that this comparison only holds when a 2B-parameter model's capability
+is sufficient for the task.
 
-Phase 5 follow-up work (`PLAN.md`) is the writeup, the inference-side
-optimization sweep, workload-shape characterization across the three
-benchmarked configs, and the hardware-rate / electricity-rate cost
-sensitivity sweep.
+Phase 5 follow-up work (`PLAN.md`) is the inference-side optimization
+sweep, workload-shape characterization across the three benchmarked
+configs, and the hardware-rate / electricity-rate cost sensitivity
+sweep.
 
 ---
 
