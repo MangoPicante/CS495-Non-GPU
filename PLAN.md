@@ -397,10 +397,18 @@ run. Phase 5 is therefore scoped to *inference-side* tuning and to writing up
 the comparison — there is no model-size scaling study to do.
 
 - [x] Document the `-ub 128` constraint required by the TL2 kernel (REPORT.md §2, Makefile)
-- [ ] Inference-side optimization sweep — pick at least one beyond the build-time `-ub` cap:
-      thread-count sensitivity (e.g. 1 / 2 / 4 / 6 on the i5-9400F), `--mlock` vs mmap,
-      or batched continuation scoring in `eval_accuracy.py`. Record results as additional
-      rows in the existing `*_step_metrics.csv` files with a `tag` column noting the variant.
+- [x] Inference-side optimization sweep — thread-count sensitivity at 1/2/4/6
+      threads on the i5-9400F.  Dedicated sweep CSVs
+      (`results/{bitnet,qwen,qwen_q4}_thread_sweep.csv`) and a new plot
+      (`results/plots/thread_scaling.png`) generated via
+      `make benchmark-threads`.  Results and analysis in `FINAL_REPORT.md` §5.4.
+      Headline findings: BitNet's TL2 kernel cannot run at threads=1
+      (`STATUS_STACK_OVERFLOW` regardless of `--ubatch`) and requires
+      `--ubatch ≤ 64` at threads=2; BitNet saturates at 4 threads (+1.9%
+      to 6 threads) while Q4 keeps climbing (+9.1%).  At threads=1, Q8
+      hits 8.1 tok/s (2.13× the paper's FP16 ~3.8) and Q4 hits 10.0
+      (2.6×) — cleanly separates quantization (~2×) from threading
+      (~2×) as the two factors in the paper-vs-ours speedup.
 - [ ] Characterize where BitNet's efficiency advantage concentrates across the three benchmarked
       workload shapes — prompt-heavy `(512, 128)` vs generation-heavy `(1, 512)` vs long-context
       `(512, 512)` — using the per-config rows already in `bitnet_step_metrics.csv` /

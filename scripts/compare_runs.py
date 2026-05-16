@@ -507,6 +507,78 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
     print(f"Saved {path}")
 
 
+def plot_thread_scaling(out_dir: Path):
+    """
+    Throughput vs thread count for the three locally measured models at the
+    (n_prompt=512, n_gen=128) reference config.
+
+    Reads dedicated *_thread_sweep.csv files written by:
+      make benchmark-threads-bitnet
+      make benchmark-threads-qwen
+      make benchmark-threads-qwen-q4
+    Skips silently when those files don't exist yet.
+    """
+    sweeps = []
+    for name, path, color in [
+        ("BitNet b1.58 2B4T",   Path("results/bitnet_thread_sweep.csv"),   BITNET_COLOR),
+        ("Qwen2.5-1.5B Q8_0",   Path("results/qwen_thread_sweep.csv"),     QWEN_COLOR),
+        ("Qwen2.5-1.5B Q4_K_M", Path("results/qwen_q4_thread_sweep.csv"),  QWEN_Q4_COLOR),
+    ]:
+        if path.exists() and path.stat().st_size > 0:
+            df = pd.read_csv(path)
+            if "n_prompt" in df.columns and "threads" in df.columns:
+                sweeps.append((name, df, color))
+
+    if not sweeps:
+        print("Skipping thread scaling plot: no thread sweep CSVs "
+              "(run 'make benchmark-threads').")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    max_y = 0
+    for name, df, color in sweeps:
+        ref = df[(df["n_prompt"] == 512) & (df["n_gen"] == 128)].copy()
+        if ref.empty:
+            continue
+        grouped = ref.groupby("threads")["throughput_tokens_s"].median().reset_index()
+        grouped = grouped.sort_values("threads")
+        ax.plot(grouped["threads"], grouped["throughput_tokens_s"],
+                marker="o", color=color, label=name, linewidth=2, markersize=8)
+        max_y = max(max_y, float(grouped["throughput_tokens_s"].max()))
+        for x, y in zip(grouped["threads"], grouped["throughput_tokens_s"]):
+            ax.annotate(f"{y:.1f}", (x, y),
+                        textcoords="offset points", xytext=(0, 8),
+                        ha="center", fontsize=8)
+
+    # Ideal-linear-scaling guide: extend from each model's 1-thread number.
+    # Helps visualize where each model falls off perfect scaling.
+    for name, df, color in sweeps:
+        ref = df[(df["n_prompt"] == 512) & (df["n_gen"] == 128)]
+        one_t = ref[ref["threads"] == 1]["throughput_tokens_s"]
+        if not one_t.empty:
+            base = float(one_t.median())
+            xs = [1, 2, 4, 6]
+            ys = [base * t for t in xs]
+            ax.plot(xs, ys, linestyle=":", color=color, alpha=0.35, linewidth=1)
+
+    ax.set_xlabel("Threads")
+    ax.set_ylabel("Throughput (tokens/s)")
+    ax.set_title(
+        "Thread-count sensitivity at n_prompt=512, n_gen=128\n"
+        "(Intel i5-9400F, 6 cores, no SMT; dotted lines = perfect linear scaling from 1-thread)"
+    )
+    ax.set_xticks([1, 2, 4, 6])
+    ax.set_xlim(0.5, 6.5)
+    ax.set_ylim(0, max_y * 1.25 if max_y else 1)
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    path = out_dir / "thread_scaling.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
 def plot_memory(local_df: pd.DataFrame, out_dir: Path,
                 qwen_df: pd.DataFrame | None = None,
                 qwen_q4_df: pd.DataFrame | None = None):
@@ -998,6 +1070,7 @@ def main():
     write_comparison_csv(comparison_df, Path(args.csv))
 
     plot_throughput(local_df, PLOTS_DIR, qwen_df, qwen_q4_df)
+    plot_thread_scaling(PLOTS_DIR)
     plot_memory(local_df, PLOTS_DIR, qwen_df, qwen_q4_df)
     plot_accuracy(local_acc, PLOTS_DIR, qwen_acc, qwen_q4_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)

@@ -42,6 +42,7 @@ QWEN_Q4_MODEL      ?= $(QWEN_DIR)/$(QWEN_Q4_FILE)
         qwen-q4-model qwen-q4-verify \
         benchmark-bitnet benchmark-qwen benchmark-qwen-q4 benchmark \
         benchmark-qwen-on-bitnet-fork \
+        benchmark-threads-bitnet benchmark-threads-qwen benchmark-threads-qwen-q4 benchmark-threads \
         plots smoke-test smoke-test-bitnet smoke-test-qwen smoke-test-qwen-q4 \
         eval-arc-easy-bitnet eval-arc-easy-qwen eval-arc-easy-qwen-q4 eval-arc-easy \
         eval-arc-challenge-bitnet eval-arc-challenge-qwen eval-arc-challenge-qwen-q4 eval-arc-challenge \
@@ -306,6 +307,41 @@ benchmark-qwen-on-bitnet-fork:
 		--model $(QWEN_MODEL) \
 		--out $(QWEN_ON_BITNET_FORK_OUT) \
 		--threads $(THREADS)
+
+# Thread-count sensitivity sweep (Phase 5).  Re-runs each model's bench
+# at THREADS=1, 2, 4, 6 (the i5-9400F has 6 cores, no SMT).  Writes to
+# dedicated *_thread_sweep.csv files so the main comparison CSVs stay
+# clean at the THREADS=4 reference condition.  Used by compare_runs.py
+# to produce thread_scaling.png and by FINAL_REPORT §5.4.
+BITNET_THREAD_SWEEP_OUT  ?= results/bitnet_thread_sweep.csv
+QWEN_THREAD_SWEEP_OUT    ?= results/qwen_thread_sweep.csv
+QWEN_Q4_THREAD_SWEEP_OUT ?= results/qwen_q4_thread_sweep.csv
+
+benchmark-threads-bitnet:
+	# threads=1 deliberately skipped: BitNet's TL2 kernel (BM=160) hits
+	# STATUS_STACK_OVERFLOW (0xC00000FD) at single-thread regardless of
+	# -ub setting.  threads=2 requires --ubatch 64 (the default 128 also
+	# crashes); for sweep consistency we use --ubatch 64 across all
+	# three thread counts.  Numbers will be slightly lower than the main
+	# reference (which used --ubatch 128 at threads=4) but the scaling
+	# behavior is what this sweep measures.  Documented in FINAL_REPORT §5.4.
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(BITNET_DIR) --model $(MODEL) --threads 2 --out $(BITNET_THREAD_SWEEP_OUT) --no-energy --ubatch 64
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(BITNET_DIR) --model $(MODEL) --threads 4 --out $(BITNET_THREAD_SWEEP_OUT) --no-energy --ubatch 64
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(BITNET_DIR) --model $(MODEL) --threads 6 --out $(BITNET_THREAD_SWEEP_OUT) --no-energy --ubatch 64
+
+benchmark-threads-qwen:
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_MODEL) --threads 1 --out $(QWEN_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_MODEL) --threads 2 --out $(QWEN_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_MODEL) --threads 4 --out $(QWEN_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_MODEL) --threads 6 --out $(QWEN_THREAD_SWEEP_OUT) --no-energy
+
+benchmark-threads-qwen-q4:
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q4_MODEL) --threads 1 --out $(QWEN_Q4_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q4_MODEL) --threads 2 --out $(QWEN_Q4_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q4_MODEL) --threads 4 --out $(QWEN_Q4_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q4_MODEL) --threads 6 --out $(QWEN_Q4_THREAD_SWEEP_OUT) --no-energy
+
+benchmark-threads: benchmark-threads-bitnet benchmark-threads-qwen benchmark-threads-qwen-q4
 
 BITNET_ACC_OUT  ?= results/accuracy_results_bitnet.json
 QWEN_ACC_OUT    ?= results/accuracy_results_qwen.json
