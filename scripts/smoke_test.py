@@ -315,7 +315,6 @@ check("exits 0", result.returncode == 0, result.stderr.strip())
 for plot_name in [
     "throughput_comparison.png",
     "memory_comparison.png",
-    "bitnet_throughput_configs.png",
     "accuracy_comparison.png",
     "cost_accuracy.png",
 ]:

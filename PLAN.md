@@ -276,10 +276,12 @@ from arXiv:2504.12285 Table 1), and writes:
      leave it blank because we have no measured energy for them.
 
 2. **Plots** in `results/plots/`:
-   - `throughput_comparison.png` — paper FP16 baselines + BitNet (paper/ours) + Qwen (paper/ours)
-   - `memory_comparison.png` — same axis, peak RSS
+   - `throughput_comparison.png` — two-panel: (a) cross-model comparison
+     (paper FP16 baselines + BitNet paper/ours + Qwen paper/Q8 ours/Q4 ours)
+     at the reference (512, 128) config; (b) per-config sensitivity for our
+     three locally measured models across all three (n_prompt, n_gen) configs
+   - `memory_comparison.png` — peak RSS, same model layout as throughput panel (a)
    - `accuracy_comparison.png` — grouped bars per task across all models
-   - `bitnet_throughput_configs.png` / `qwen_throughput_configs.png` — per-config throughput
    - `cost_accuracy.png` — cost vs **mean of 5 benchmarks** (hollow ○ = paper, filled ♦ = ours)
    - `{task}_cost_accuracy.png` for each of `arc_easy, arc_challenge, winogrande, hellaswag, mmlu`
    - `memory_accuracy_pareto.png` — memory vs **mean of 5 benchmarks**

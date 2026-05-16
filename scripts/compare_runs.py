@@ -414,28 +414,95 @@ def _legend_handles(qwen_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | Non
 def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
                     qwen_df: pd.DataFrame | None = None,
                     qwen_q4_df: pd.DataFrame | None = None):
-    if not _has_bench_data(local_df) and not _has_bench_data(qwen_df) and not _has_bench_data(qwen_q4_df):
+    """
+    Single unified throughput plot with two panels:
+
+      (a) Cross-model bar chart at (n_prompt=512, n_gen=128) — paper FP16
+          baselines + BitNet (paper, ours) + Qwen (paper FP16, Q8 ours, Q4 ours).
+      (b) Per-config sensitivity — grouped bars across the three benchmarked
+          (n_prompt, n_gen) configs for our three locally measured models.
+          The paper FP16 baselines only publish numbers at (512, 128), so
+          they don't appear in this panel.
+    """
+    has_b = _has_bench_data(local_df)
+    has_q = _has_bench_data(qwen_df)
+    has_4 = _has_bench_data(qwen_q4_df)
+    if not (has_b or has_q or has_4):
         print("Skipping throughput plot: no benchmark CSVs (run 'make benchmark').")
         return
-    labels, values, colors, hatches = _bar_series(local_df, qwen_df, qwen_q4_df, "throughput_tokens_s")
 
-    fig, ax = plt.subplots(figsize=(10, max(5, len(labels) * 0.55)))
+    labels, values, colors, hatches = _bar_series(local_df, qwen_df, qwen_q4_df, "throughput_tokens_s")
+    fig = plt.figure(figsize=(13, max(9, len(labels) * 0.55 + 4)))
+    gs = fig.add_gridspec(2, 1, height_ratios=[len(labels) * 0.55, 4.5], hspace=0.35)
+    ax_main = fig.add_subplot(gs[0])
+    ax_cfg  = fig.add_subplot(gs[1])
+
+    # ── (a) Cross-model comparison at (512, 128) ─────────────────────────
     max_val = max(v for v in values if v) or 1
     for i, (val, color, hatch) in enumerate(zip(values, colors, hatches)):
-        ax.barh(i, val, color=color, hatch=hatch,
-                edgecolor="#444444" if hatch else "#cccccc", linewidth=0.5)
-        ax.text(val + max_val * 0.01, i, f"{val:.1f}", va="center", fontsize=9)
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels(labels)
-    ax.set_xlabel("Throughput (tokens/s)")
-    ax.set_title("Inference Throughput: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
-                 "(n_prompt=512, n_gen=128, CPU)")
-    ax.set_xlim(0, max_val * 1.15)
-    ax.invert_yaxis()
-    ax.legend(handles=_legend_handles(qwen_df, qwen_q4_df), loc="lower right", fontsize=8)
+        ax_main.barh(i, val, color=color, hatch=hatch,
+                     edgecolor="#444444" if hatch else "#cccccc", linewidth=0.5)
+        ax_main.text(val + max_val * 0.01, i, f"{val:.1f}", va="center", fontsize=9)
+    ax_main.set_yticks(range(len(labels)))
+    ax_main.set_yticklabels(labels)
+    ax_main.set_xlabel("Throughput (tokens/s)")
+    ax_main.set_title("(a) Cross-model comparison at n_prompt=512, n_gen=128", loc="left")
+    ax_main.set_xlim(0, max_val * 1.15)
+    ax_main.invert_yaxis()
+    ax_main.legend(handles=_legend_handles(qwen_df, qwen_q4_df), loc="upper right", fontsize=8)
+
+    # ── (b) Per-config sensitivity for the locally measured models ───────
+    configs = [(512, 128), (512, 512), (1, 512)]
+    config_labels = [f"p={p} / g={g}" for p, g in configs]
+    series = []
+    if has_b:
+        series.append(("BitNet b1.58 2B4T",   local_df,   BITNET_COLOR))
+    if has_q:
+        series.append(("Qwen2.5-1.5B Q8_0",   qwen_df,    QWEN_COLOR))
+    if has_4:
+        series.append(("Qwen2.5-1.5B Q4_K_M", qwen_q4_df, QWEN_Q4_COLOR))
+
+    x = np.arange(len(configs))
+    width = 0.8 / max(len(series), 1)
+    offsets = np.linspace(-(len(series) - 1) * width / 2,
+                          (len(series) - 1) * width / 2, len(series))
+    all_vals: list[float] = []
+    for idx, (name, df, color) in enumerate(series):
+        vals = []
+        for p, g in configs:
+            row = df[(df["n_prompt"] == p) & (df["n_gen"] == g)]
+            v = float(row["throughput_tokens_s"].median()) if not row.empty else 0.0
+            vals.append(v)
+        all_vals.extend(vals)
+        ax_cfg.bar(x + offsets[idx], vals, width, label=name, color=color)
+    y_top = max(all_vals) * 1.18 if all_vals else 1
+    for idx, (name, df, color) in enumerate(series):
+        vals = []
+        for p, g in configs:
+            row = df[(df["n_prompt"] == p) & (df["n_gen"] == g)]
+            v = float(row["throughput_tokens_s"].median()) if not row.empty else 0.0
+            vals.append(v)
+        for xi, v in zip(x + offsets[idx], vals):
+            if v > 0:
+                ax_cfg.text(xi, v + y_top * 0.015, f"{v:.1f}",
+                            ha="center", fontsize=8)
+    ax_cfg.set_xticks(x)
+    ax_cfg.set_xticklabels(config_labels)
+    ax_cfg.set_ylabel("Throughput (tokens/s)")
+    ax_cfg.set_ylim(0, y_top)
+    ax_cfg.set_title("(b) Per-config sensitivity (locally measured models)", loc="left")
+    ax_cfg.legend(loc="upper right", fontsize=8)
+    ax_cfg.grid(axis="y", alpha=0.3)
+
+    fig.suptitle(
+        "Inference Throughput: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines (CPU)",
+        fontsize=13,
+    )
     fig.tight_layout()
+    # bbox_inches="tight" prevents the long y-axis labels in panel (a) from
+    # being clipped by the gridspec's default left margin.
     path = out_dir / "throughput_comparison.png"
-    fig.savefig(path, dpi=150)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -464,25 +531,6 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path,
     ax.legend(handles=_legend_handles(qwen_df, qwen_q4_df), loc="lower right", fontsize=8)
     fig.tight_layout()
     path = out_dir / "memory_comparison.png"
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    print(f"Saved {path}")
-
-
-def plot_throughput_by_config(df: pd.DataFrame, out_dir: Path,
-                              model_name: str, color: str, filename: str):
-    if df is None or df.empty:
-        print(f"Skipping {filename}: no benchmark CSV.")
-        return
-    configs = df.groupby(["n_prompt", "n_gen"])["throughput_tokens_s"].median().reset_index()
-    labels = [f"p={int(row.n_prompt)} / g={int(row.n_gen)}" for _, row in configs.iterrows()]
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(labels, configs["throughput_tokens_s"], color=color)
-    ax.set_ylabel("Throughput (tokens/s)")
-    ax.set_title(f"{model_name} Throughput by Prompt/Generation Length")
-    fig.tight_layout()
-    path = out_dir / filename
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"Saved {path}")
@@ -951,12 +999,6 @@ def main():
 
     plot_throughput(local_df, PLOTS_DIR, qwen_df, qwen_q4_df)
     plot_memory(local_df, PLOTS_DIR, qwen_df, qwen_q4_df)
-    plot_throughput_by_config(local_df, PLOTS_DIR,
-                              "BitNet b1.58 2B4T", BITNET_COLOR, "bitnet_throughput_configs.png")
-    plot_throughput_by_config(qwen_df, PLOTS_DIR,
-                              "Qwen2.5-1.5B-Instruct Q8_0", QWEN_COLOR, "qwen_throughput_configs.png")
-    plot_throughput_by_config(qwen_q4_df, PLOTS_DIR,
-                              "Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_Q4_COLOR, "qwen_q4_throughput_configs.png")
     plot_accuracy(local_acc, PLOTS_DIR, qwen_acc, qwen_q4_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
     plot_energy_carbon(local_df, qwen_df, PLOTS_DIR, qwen_q4_df,
