@@ -90,8 +90,8 @@ make bitnet-model
 make bitnet-verify
 
 # Clone + build upstream llama.cpp for Qwen, download both quants
-make qwen-setup            # builds + downloads Q8_0
-make qwen-verify
+make qwen-q8-setup         # builds + downloads Q8_0
+make qwen-q8-verify
 make qwen-q4-model         # add the Q4_K_M GGUF
 make qwen-q4-verify
 
@@ -119,15 +119,16 @@ make eval-accuracy LIMIT=100   # Quick sanity check at smaller sample size
 
 # Per-task evals (ARC-Easy/Challenge, WinoGrande, HellaSwag, MMLU 5-shot)
 make eval-mmlu-bitnet
-make eval-arc-easy-qwen
+make eval-arc-easy-qwen-q8
+make eval-arc-easy-qwen-q4
 # ...see make help for the full list
 
 # Regenerate the comparison table and all plots
 make plots                 # → results/comparison_table.csv + results/plots/*.png
 
 # Phase 5 sensitivity sweeps
-make benchmark-threads             # Thread-count sweep (1/2/4/6 cores)
-make benchmark-qwen-on-bitnet-fork # Cross-stack sensitivity check
+make benchmark-threads                # Thread-count sweep (1/2/4/6 cores)
+make benchmark-qwen-q8-on-bitnet-fork # Cross-stack sensitivity check
 ```
 
 `make help` lists every target with one-line descriptions.
@@ -161,7 +162,7 @@ CS495-Non-GPU/
 ```
 
 External (not in this repo): `../Models/BitNet/` and `../Models/Qwen/`,
-created and populated by the `make bitnet-setup` / `qwen-setup` targets.
+created and populated by the `make bitnet-setup` / `qwen-q8-setup` targets.
 
 ---
 

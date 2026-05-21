@@ -5,11 +5,12 @@
 **Hardware:** Intel Core i5-9400F @ 2.90 GHz (6 cores, 4 threads used), 16 GB RAM, Windows 11
 **Models under test:**
 - BitNet b1.58 2B4T (i2_s GGUF, 1.71 GiB) via `microsoft/BitNet` (commit `01eb4157`)
-- Qwen2.5-1.5B-Instruct (Q8_0 GGUF, 1.65 GiB) via upstream `ggml-org/llama.cpp` (commit `1e5ad35d`)
+- Qwen2.5-1.5B-Instruct Q8_0 (GGUF, 1.65 GiB) via upstream `ggml-org/llama.cpp` (commit `1e5ad35d`)
+- Qwen2.5-1.5B-Instruct Q4_K_M (GGUF, ~1.0 GiB) — same upstream `llama.cpp` build
 - Five FP16 baselines as reported in arXiv:2504.12285 Table 1
   (LLaMA 3.2 1B, Gemma-3 1B, Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B)
 
-This report is the Phase 4 deliverable: a comparison dashboard of the two
+This report is the Phase 4 deliverable: a comparison dashboard of the three
 locally measured models against each other and against published FP16
 baselines, with a cross-reference of measured energy against the paper's
 FP16 J/tok estimates. Methodology and per-script implementation details
@@ -687,8 +688,8 @@ memory becomes a multi-GB issue, but that regime is beyond what our
    the older fork would understate its production-realistic throughput.
    To check whether the cross-stack comparison is materially confounded
    by stack-version differences, we re-ran Qwen Q8_0 against the BitNet
-   fork's `llama-bench` (`make benchmark-qwen-on-bitnet-fork` →
-   `results/qwen_on_bitnet_fork_step_metrics.csv`):
+   fork's `llama-bench` (`make benchmark-qwen-q8-on-bitnet-fork` →
+   `results/qwen_q8_on_bitnet_fork_step_metrics.csv`):
 
    | Config | Qwen Q8 on upstream | Qwen Q8 on BitNet fork | Δ |
    |---|---:|---:|---:|

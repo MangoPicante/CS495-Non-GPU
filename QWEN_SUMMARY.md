@@ -61,9 +61,24 @@ We use the **Instruct** variant. Base would be more directly comparable to BitNe
 
 ---
 
-## 3. Q8_0 Quantization
+## 3. Quantizations Measured Here (Q8_0 and Q4_K_M)
 
-### 3.1 Format
+This project benchmarks Qwen2.5-1.5B-Instruct at two GGUF quantization tiers
+from the same upstream `Qwen/Qwen2.5-1.5B-Instruct-GGUF` release:
+
+- **Q8_0** (~1.65 GiB) — near-FP16 accuracy, the high-fidelity reference.
+- **Q4_K_M** (~1.0 GiB) — aggressive K-quants variant; tests "would 4-bit
+  have been enough?" alongside the Q8_0 measurement.
+
+Both run through the same upstream `llama.cpp` build (`qwen-build` target)
+and the same `llama-bench` / `llama-server` pipeline; only the GGUF file
+differs. The Q4_K_M format mixes per-block scales of differing widths
+(super-blocks of 256 weights, sub-blocks of 32) and uses 6-bit scales for
+the most accuracy-sensitive tensors — the headline result is in
+[`FINAL_REPORT.md`](FINAL_REPORT.md). The rest of this section focuses on
+Q8_0 because its structure is simpler and it is the reference baseline.
+
+### 3.1 Q8_0 Format
 
 Q8_0 is GGUF's "8-bit symmetric, fixed-block" quantization scheme — the highest-fidelity quant tier in common use on CPU. The weight tensor is partitioned into blocks of 32 elements; each block is stored as:
 
@@ -142,7 +157,7 @@ Three constraints narrow the practical choice of "what FP16 model do we run alon
 
 1. **Size class.** BitNet b1.58 2B4T is 2.74B parameters. A fair efficiency baseline needs to be the same order of magnitude — comparing a 1-bit 2B model against a 7B FP16 model would conflate "quantization helps" with "smaller model is cheaper." Qwen2.5-1.5B (1.54B params) is the closest comparable Apache-licensed FP16 model whose published accuracy lands in the same band as BitNet 2B4T.
 
-2. **Licensing and reproducibility.** The model is Apache 2.0, GGUFs are first-party on HuggingFace, and Q8_0 conversion is deterministic. Anyone re-running this benchmark gets bit-identical weights.
+2. **Licensing and reproducibility.** The model is Apache 2.0, GGUFs are first-party on HuggingFace, and both the Q8_0 and Q4_K_M conversions are deterministic. Anyone re-running this benchmark gets bit-identical weights.
 
 3. **Inference stack alignment.** Qwen2.5 is a pure LLaMA-architecture model that runs on **upstream `llama.cpp`** without any custom kernels or model-side patches. This matters because the BitNet fork lags upstream by ~1 year of llama.cpp development; isolating the FP16 baseline on upstream lets us see what a current llama.cpp build can do on the same hardware.
 
@@ -156,7 +171,7 @@ Alternatives considered and rejected:
 
 ## 6. Inference Stack: Upstream `llama.cpp` vs BitNet's Fork
 
-Both BitNet b1.58 2B4T and Qwen2.5-1.5B-Instruct are served via `llama-server` HTTP endpoints in this project. Crucially, **they use different `llama.cpp` builds**:
+Both BitNet b1.58 2B4T and Qwen2.5-1.5B-Instruct (Q8_0 and Q4_K_M) are served via `llama-server` HTTP endpoints in this project. Crucially, **they use different `llama.cpp` builds** (the two Qwen quantizations share the upstream build):
 
 | Aspect | Upstream `llama.cpp` (Qwen) | `microsoft/BitNet` fork (BitNet) |
 |---|---|---|
