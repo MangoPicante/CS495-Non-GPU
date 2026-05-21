@@ -33,6 +33,19 @@ QWEN_Q4_QUANT      := q4_k_m
 QWEN_Q4_FILE       := qwen2.5-1.5b-instruct-$(QWEN_Q4_QUANT).gguf
 QWEN_Q4_MODEL      ?= $(QWEN_DIR)/$(QWEN_Q4_FILE)
 
+# ── System-card / technical-report PDFs ──────────────────────────────────────
+# These URLs were verified 2026-05-20.  Anthropic rotates the asset hashes
+# in their /m/<hash>/ paths from time to time — if a download 404s, check
+# https://www.anthropic.com/system-cards for the current link.
+CLOUD_DIR             ?= ../Models/Cloud
+CURL                  := curl -L --fail --silent --show-error
+BITNET_PAPER_URL      := https://arxiv.org/pdf/2504.12285
+QWEN_PAPER_URL        := https://arxiv.org/pdf/2412.15115
+GPT4O_CARD_URL        := https://cdn.openai.com/gpt-4o-system-card.pdf
+HAIKU_45_CARD_URL     := https://assets.anthropic.com/m/99128ddd009bdcb/Claude-Haiku-4-5-System-Card.pdf
+SONNET_45_CARD_URL    := https://assets.anthropic.com/m/12f214efcc2f457a/original/Claude-Sonnet-4-5-System-Card.pdf
+OPUS_47_CARD_URL      := https://www.anthropic.com/claude-opus-4-7-system-card
+
 .DEFAULT_GOAL := help
 
 .PHONY: help \
@@ -46,6 +59,7 @@ QWEN_Q4_MODEL      ?= $(QWEN_DIR)/$(QWEN_Q4_FILE)
         benchmark-qwen-q8-on-bitnet-fork \
         benchmark-threads-bitnet benchmark-threads-qwen-q8 benchmark-threads-qwen-q4 benchmark-threads \
         plots smoke-test smoke-test-bitnet smoke-test-qwen-q8 smoke-test-qwen-q4 \
+        system-cards system-cards-bitnet system-cards-qwen system-cards-cloud \
         eval-arc-easy-bitnet eval-arc-easy-qwen-q8 eval-arc-easy-qwen-q4 eval-arc-easy \
         eval-arc-challenge-bitnet eval-arc-challenge-qwen-q8 eval-arc-challenge-qwen-q4 eval-arc-challenge \
         eval-mmlu-bitnet eval-mmlu-qwen-q8 eval-mmlu-qwen-q4 eval-mmlu \
@@ -120,6 +134,12 @@ help:
 	@echo "  smoke-test-bitnet             Verify BitNet inference only"
 	@echo "  smoke-test-qwen-q8            Verify Qwen Q8_0 inference only"
 	@echo "  smoke-test-qwen-q4            Verify Qwen Q4_K_M inference only"
+	@echo ""
+	@echo "System cards / technical reports (one-off PDF downloads):"
+	@echo "  system-cards                  Download every paper / system card used in the comparison"
+	@echo "  system-cards-bitnet           BitNet b1.58 2B4T technical report (arXiv:2504.12285) -> \$$(BITNET_DIR)"
+	@echo "  system-cards-qwen             Qwen2.5 technical report (arXiv:2412.15115) -> \$$(QWEN_DIR)"
+	@echo "  system-cards-cloud            GPT-4o + Claude 4.5/4.7 system cards -> \$$(CLOUD_DIR)"
 	@echo ""
 	@echo "Housekeeping:"
 	@echo "  clean               Remove results/plots/ and cached .pyc files"
@@ -590,6 +610,47 @@ qwen-q4-verify:
 
 qwen-clean:
 	rm -rf $(QWEN_DIR)
+
+# ── System-card / technical-report downloads ──────────────────────────────────
+#
+# One-off PDF downloads of each model's paper or safety/system card.  The
+# files land next to the model weights:
+#
+#   $(BITNET_DIR)/BitNet-b1.58-2B4T-Technical-Report.pdf
+#   $(QWEN_DIR)/Qwen2.5-Technical-Report.pdf
+#   $(CLOUD_DIR)/{GPT-4o,Claude-Haiku-4-5,Claude-Sonnet-4-5,Claude-Opus-4-7}-System-Card.pdf
+#
+# Each target is idempotent — already-present files are not re-downloaded, so
+# 'make system-cards' can be safely re-run after a single missing file is
+# deleted.  Pass -B to force re-download.
+#
+# GPT-4o mini is intentionally not its own download: OpenAI does not publish a
+# standalone system card for it.  Its safety eval numbers appear inside
+# GPT-4o-System-Card.pdf as a comparison column.  See $(CLOUD_DIR)/README.md.
+
+system-cards: system-cards-bitnet system-cards-qwen system-cards-cloud
+	@echo "All system cards present."
+
+system-cards-bitnet:
+	@mkdir -p $(BITNET_DIR)
+	@[ -f $(BITNET_DIR)/BitNet-b1.58-2B4T-Technical-Report.pdf ] \
+	    || $(CURL) -o $(BITNET_DIR)/BitNet-b1.58-2B4T-Technical-Report.pdf $(BITNET_PAPER_URL)
+
+system-cards-qwen:
+	@mkdir -p $(QWEN_DIR)
+	@[ -f $(QWEN_DIR)/Qwen2.5-Technical-Report.pdf ] \
+	    || $(CURL) -o $(QWEN_DIR)/Qwen2.5-Technical-Report.pdf $(QWEN_PAPER_URL)
+
+system-cards-cloud:
+	@mkdir -p $(CLOUD_DIR)
+	@[ -f $(CLOUD_DIR)/GPT-4o-System-Card.pdf ] \
+	    || $(CURL) -o $(CLOUD_DIR)/GPT-4o-System-Card.pdf $(GPT4O_CARD_URL)
+	@[ -f $(CLOUD_DIR)/Claude-Haiku-4-5-System-Card.pdf ] \
+	    || $(CURL) -o $(CLOUD_DIR)/Claude-Haiku-4-5-System-Card.pdf $(HAIKU_45_CARD_URL)
+	@[ -f $(CLOUD_DIR)/Claude-Sonnet-4-5-System-Card.pdf ] \
+	    || $(CURL) -o $(CLOUD_DIR)/Claude-Sonnet-4-5-System-Card.pdf $(SONNET_45_CARD_URL)
+	@[ -f $(CLOUD_DIR)/Claude-Opus-4-7-System-Card.pdf ] \
+	    || $(CURL) -o $(CLOUD_DIR)/Claude-Opus-4-7-System-Card.pdf $(OPUS_47_CARD_URL)
 
 # ── Housekeeping ───────────────────────────────────────────────────────────────
 
