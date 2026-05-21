@@ -290,7 +290,7 @@ from arXiv:2504.12285 Table 1), and writes:
    - `accuracy_comparison.png` — grouped bars per task across all models
    - `cost_accuracy.png` — cost vs **mean of 5 benchmarks** (hollow ○ = paper, filled ♦ = ours)
    - `{task}_cost_accuracy.png` for each of `arc_easy, arc_challenge, winogrande, hellaswag, mmlu`
-   - `memory_accuracy_pareto.png` — memory vs **mean of 5 benchmarks**
+   - `memory_accuracy.png` — memory vs **mean of 5 benchmarks**
    - `{task}_memory_accuracy.png` per task
    - `energy_carbon_comparison.png` — three panels: Wh, gCO₂, and USD (local
      electricity cost at `--electricity-rate`) per 1k tokens
@@ -300,6 +300,16 @@ from arXiv:2504.12285 Table 1), and writes:
      Anthropic Claude Haiku 4.5 / Sonnet 4.5 / Opus 4.7).  API prices are
      hardcoded in `CLOUD_API_PRICING` and should be re-verified before
      publication.
+   - `cloud_accuracy_comparison.png` — grouped-bar accuracy plot in the style
+     of `accuracy_comparison.png` but for self-hosted ours-rows vs the cloud
+     APIs (uses `CLOUD_API_ACCURACY` values; non-MMLU bars are typically empty
+     for cloud rows since safety cards omit them).
+   - `cloud_cost_accuracy.png` — cost vs **MMLU** scatter for self-hosted +
+     cloud APIs (uses MMLU specifically rather than mean-of-5 because that's
+     the only benchmark consistently published across cloud providers).
+   - `thread_scaling.png` — throughput vs thread count (1/2/4/6 threads) for
+     all three locally measured models, with per-model linear-scaling guides
+     (FINAL_REPORT §5.4).
 
    The cost– and memory–accuracy scatters share a single `_accuracy_scatter`
    helper so the hollow-vs-filled marker convention and dotted paper→ours
@@ -325,14 +335,17 @@ exit on any failure.
 | Gemma-3 1B | paper (FP16) | 4.1 | 2,700 | $0.01152 | 79.42 | 46.25 | 66.38 | 72.15 | 50.33 |
 | SmolLM2 1.7B | paper (FP16) | 3.5 | 3,300 | $0.01349 | 81.82 | 52.99 | 68.67 | 72.29 | 51.77 |
 | MiniCPM 2B | paper (FP16) | 2.9 | 4,100 | $0.01628 | 82.20 | 51.96 | 68.27 | 75.08 | 53.07 |
-| BitNet b1.58 2B4T | paper | 20.0 | 1,400 | $0.00236 | 74.79 | 49.91 | 71.90 | 68.44 | 53.17 |
-| **BitNet b1.58 2B4T** | **ours** | **21.2** | **1,247** | **$0.00223** | **74.2** | **46.0** | **75.2** | **58.6** | **54.69** |
 | Qwen2.5 1.5B | paper (FP16) | 3.8 | 3,100 | $0.01243 | 79.92 | 52.82 | 66.61 | 70.95 | 61.11 |
 | **Qwen2.5-1.5B-Instruct Q8_0** | **ours** | **15.1** | **1,667** | **$0.00313** | **74.2** | **44.2** | **65.8** | **59.0** | **62.28** |
+| **Qwen2.5-1.5B-Instruct Q4_K_M** | **ours** | **24.9** | **1,632** | **$0.00190** | **71.0** | **43.2** | **63.0** | **58.8** | **61.23** |
+| **BitNet b1.58 2B4T** | **ours** | **21.2** | **1,247** | **$0.00223** | **74.2** | **46.0** | **75.2** | **58.6** | **54.69** |
+| BitNet b1.58 2B4T | paper | 20.0 | 1,400 | $0.00236 | 74.79 | 49.91 | 71.90 | 68.44 | 53.17 |
 
 BitNet (ours) is ~40% faster, ~25% less memory, and ~29% cheaper than Qwen
-(ours).  Mean-of-5 accuracy ties (61.7% vs 61.1%); BitNet wins WinoGrande by
-+9.4pt, Qwen wins MMLU by +7.6pt.
+Q8 (ours) at comparable mean accuracy (61.7% vs 61.1%); BitNet wins WinoGrande
+by +9.4pt, Qwen Q8 wins MMLU by +7.6pt.  Qwen Q4_K_M lands at ~$0.0019 / 1k
+tokens — the cheapest self-hosted row in the table — at a -1pt average
+accuracy cost relative to Q8.
 
 ---
 
@@ -380,9 +393,11 @@ BitNet (ours) is ~40% faster, ~25% less memory, and ~29% cheaper than Qwen
       `qwen-q4-verify`, `smoke-test-qwen-q4`), `compare_runs.py` plot/table
       paths, and `smoke_test.py` model loop. Q4 row appears in every plot
       and the comparison CSV as data accumulates.
-- [ ] Run Qwen Q4_K_M benchmarks and accuracy eval (`make qwen-q4-model && make benchmark-qwen-q4 && make eval-accuracy-qwen-q4`)
-      so the Q4 row populates in `comparison_table.csv` and the plots.
-- [ ] Refresh `FINAL_REPORT.md` with the Q4 row in the headline tables and
+- [x] Run Qwen Q4_K_M benchmarks and accuracy eval — Q4 row now populated
+      in `comparison_table.csv` and across every plot.  Q4 lands at 24.9
+      tok/s and ~$0.0019 / 1k tokens (the cheapest self-hosted row) with a
+      ~1pt average-accuracy cost vs Q8.
+- [x] Refresh `FINAL_REPORT.md` with the Q4 row in the headline tables and
       a short discussion of the Q8 vs Q4 quantization-sensitivity result.
 - [x] Compare measured energy against FP16 estimates from the literature
       (`FINAL_REPORT.md` §4 — paper J/tok values cross-referenced; documents
@@ -391,6 +406,19 @@ BitNet (ours) is ~40% faster, ~25% less memory, and ~29% cheaper than Qwen
 - [x] Produce final benchmark dashboard (plots + `comparison_table.csv`) in
       `FINAL_REPORT.md` — executive summary, all 18 plots referenced,
       discussion, threats-to-validity, conclusion
+- [x] Cloud-API cost / accuracy comparison — `CLOUD_API_PRICING` (output token
+      $/M for GPT-4o, GPT-4o mini, Claude Haiku/Sonnet/Opus 4.5/4.7) and
+      `CLOUD_API_ACCURACY` (MMLU per provider) drive two new plots:
+      `cloud_accuracy_comparison.png` and `cloud_cost_accuracy.png`.
+      Per-cell source noted in `compare_runs.py` since current cloud system
+      cards have mostly moved past standard MMLU (Sonnet/Haiku 4.5 cards are
+      safety-focused; Opus 4.7 reports MMMLU; GPT-4o card uses only a medical
+      MMLU subset).
+- [x] System-card / technical-report PDFs alongside the weights —
+      `make system-cards` downloads BitNet (arXiv:2504.12285) and Qwen2.5
+      (arXiv:2412.15115) technical reports into the existing model dirs, plus
+      GPT-4o and Claude 4.5/4.7 system cards into `../Models/Cloud/` with a
+      provenance README. GPT-4o mini shares the GPT-4o card (no standalone).
 
 ### Phase 5 — Optimization & Writeup
 
@@ -425,10 +453,18 @@ the comparison — there is no model-size scaling study to do.
 - [ ] Cost-model sensitivity: re-run `compare_runs.py --hardware-rate` for at least one
       alternative (spot c5.xlarge, ARM Graviton on-demand, local desktop $0/hr) and confirm
       whether the BitNet < Qwen < FP16-baselines cost ordering is robust to the rate choice.
-- [ ] Write capstone research report to `FINAL_REPORT.md` — methodology, headline numbers from
-      `comparison_table.csv`, plots from `results/plots/`, and an explicit threats-to-validity
-      section (single-CPU run, the logit-bias asymmetry between upstream and BitNet's fork,
-      0-shot vs paper's 5-shot MMLU framing, hardware-rate sensitivity).
+- [x] Write capstone research report to `FINAL_REPORT.md` — methodology,
+      headline numbers from `comparison_table.csv`, plots from `results/plots/`,
+      and an explicit threats-to-validity section (single-CPU run, the
+      logit-bias asymmetry between upstream and BitNet's fork, 0-shot vs
+      paper's 5-shot MMLU framing, hardware-rate sensitivity).  Now includes
+      §5.4 thread-count sensitivity, §5.5 workload-shape sensitivity, and the
+      §6.8 cross-stack check (Qwen Q8 on the BitNet fork).
+- [x] Smoke-test hardening — `scripts/smoke_test.py` now prefixes every
+      check label with the model name (so failures in the summary identify
+      which model triggered them) and runs MMLU at 5-shot with a 1024-token
+      eval-server context (0-shot on abstract_algebra was deterministically
+      scoring 0/5 for BitNet, masking real regressions).
 - [ ] Prepare final presentation slides in `presentation.pptx`.
 - [x] Clean up repository for reproducibility — `README.md` rewritten as
       an inference-benchmarking front-door (was previously stuck describing
