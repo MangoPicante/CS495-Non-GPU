@@ -215,18 +215,18 @@ def smoke_model(name: str, cli: Path, model: Path,
         kv("Response", repr(response))
 
         if response == "TIMEOUT":
-            check(f"{label}: completed within {INFERENCE_TIMEOUT}s", False, "TIMEOUT")
+            check(f"{name} / {label}: completed within {INFERENCE_TIMEOUT}s", False, "TIMEOUT")
             continue
 
         hit = any(kw.lower() in response.lower() for kw in keywords)
         expected_str = " or ".join(repr(k) for k in keywords)
-        check(f"response contains {expected_str}", hit)
+        check(f"{name} / {label}: response contains {expected_str}", hit)
 
         if tps is not None:
             tps_list.append(tps)
             kv("Speed", f"{tps:5.1f} tok/s   {dim('·')}   {cost_per_1k(tps)} / 1k tokens")
         else:
-            check(f"{label}: llama-cli exited cleanly", rc == 0, f"exit code {rc}")
+            check(f"{name} / {label}: llama-cli exited cleanly", rc == 0, f"exit code {rc}")
 
     if tps_list:
         avg = sum(tps_list) / len(tps_list)
@@ -406,7 +406,7 @@ for _name, _server_bin, _model_path in _eval_configs:
                 stderr=subprocess.PIPE, text=True, cwd=ROOT,
                 timeout=EVAL_TIMEOUT,
             )
-            check(f"{task}: exits 0", r.returncode == 0, r.stderr.strip()[:200])
+            check(f"{_name} / {task}: exits 0", r.returncode == 0, r.stderr.strip()[:200])
             # An overall 0% is essentially impossible for these models on this
             # sample size by chance — it almost always indicates a scoring
             # methodology regression (e.g. prompt format mismatch, tokenizer
@@ -415,12 +415,12 @@ for _name, _server_bin, _model_path in _eval_configs:
                 try:
                     acc = json.loads(EVAL_SMOKE_OUT.read_text()).get(task, {}).get("accuracy")
                 except (json.JSONDecodeError, OSError) as e:
-                    check(f"{task}: accuracy readable", False, str(e)[:100])
+                    check(f"{_name} / {task}: accuracy readable", False, str(e)[:100])
                 else:
                     ok = isinstance(acc, (int, float)) and acc > 0
-                    check(f"{task}: accuracy > 0%", ok, f"got {acc!r}")
+                    check(f"{_name} / {task}: accuracy > 0%", ok, f"got {acc!r}")
         except subprocess.TimeoutExpired:
-            check(f"{task}: completed within {EVAL_TIMEOUT}s", False, "TIMEOUT")
+            check(f"{_name} / {task}: completed within {EVAL_TIMEOUT}s", False, "TIMEOUT")
     _stop_eval_server()
 
 # ── Summary ───────────────────────────────────────────────────────────────────
