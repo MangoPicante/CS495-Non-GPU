@@ -68,6 +68,9 @@ External dependencies (cloned and built into sibling directories by the
 
 - `../Models/BitNet/` — `microsoft/BitNet` at commit `01eb4157` (the inference fork with the TL2 ternary-lookup kernel)
 - `../Models/Qwen/llama.cpp/` — `ggml-org/llama.cpp` at commit `1e5ad35d` (upstream, used for both Qwen variants)
+- `../Models/Cloud/` — populated by `make system-cards-cloud` with the
+  GPT-4o / Claude 4.5 / Claude Opus 4.7 system-card PDFs used by the
+  cost-vs-cloud comparison (§3.9 of `FINAL_REPORT.md`).
 
 Reference hardware: Intel Core i5-9400F (6 cores, no SMT), 16 GB RAM,
 Windows 11.
@@ -95,9 +98,15 @@ make qwen-q8-verify
 make qwen-q4-model         # add the Q4_K_M GGUF
 make qwen-q4-verify
 
+# Optional: download the paper / system-card PDFs into the Models dirs
+make system-cards          # arXiv reports for BitNet & Qwen, plus the
+                           # GPT-4o / Claude 4.5 / Opus 4.7 system cards
+                           # into ../Models/Cloud/
+
 # Verify the full pipeline end-to-end
-make smoke-test            # ~5 minutes; three models, three prompts each,
-                           # then a 5-sample accuracy sweep per model
+make smoke-test            # ~25 min total (8-10 min/model since the MMLU
+                           # 5-shot fix): three prompts each, then a
+                           # 5-sample 5-shot accuracy sweep per model
 ```
 
 For the full end-to-end command list (benchmarks, accuracy, plots,
@@ -123,8 +132,17 @@ make eval-arc-easy-qwen-q8
 make eval-arc-easy-qwen-q4
 # ...see make help for the full list
 
-# Regenerate the comparison table and all plots
+# Regenerate the comparison table and all 20 plots (incl. cloud comparison)
 make plots                 # → results/comparison_table.csv + results/plots/*.png
+                           # Plots include cloud_cost_comparison.png,
+                           # cloud_accuracy_comparison.png, and
+                           # cloud_cost_accuracy.png — the cost vs cloud-API
+                           # tier headline lives there.
+
+# Override the hardware rate to test cost-model sensitivity (Phase 5):
+poetry run python scripts/compare_runs.py --hardware-rate 0.05   # spot c5.xlarge
+poetry run python scripts/compare_runs.py --hardware-rate 0.1156 # ARM Graviton c7g.xlarge
+# Ordering of comparison_table.csv rows by $/1k tok is invariant across rates.
 
 # Phase 5 sensitivity sweeps
 make benchmark-threads                # Thread-count sweep (1/2/4/6 cores)
