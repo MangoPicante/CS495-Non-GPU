@@ -238,9 +238,13 @@ def smoke_model(name: str, cli: Path, model: Path,
 
 def _start_eval_server(server_bin: Path, model: Path) -> bool:
     global _eval_server
+    # ctx=1024: large enough for the 5-shot MMLU prompt (header + 5 shots +
+    # test question ≈ 300-450 tokens on abstract_algebra) while staying small
+    # enough to keep KV cache cheap.  512 worked for 0-shot but truncates
+    # 5-shot MMLU.
     cmd = [
         str(server_bin), "-m", str(model),
-        "-c", "512", "-t", str(THREADS), "-ub", "128", "-ngl", "0",
+        "-c", "1024", "-t", str(THREADS), "-ub", "128", "-ngl", "0",
         "--host", "127.0.0.1", "--port", str(EVAL_PORT), "-cb",
     ]
     _eval_server = subprocess.Popen(
@@ -391,7 +395,11 @@ for _name, _server_bin, _model_path in _eval_configs:
     EVAL_SMOKE_OUT.unlink(missing_ok=True)  # always start fresh; no stale checkpoint
     for task in ("mmlu", "arc_easy", "arc_challenge", "hellaswag"):
         print(f"\n    {bold(task)}", flush=True)
-        extra = ["--max-subjects", "1"] if task == "mmlu" else []
+        # MMLU needs --num-fewshot 5 to match the paper protocol — without the
+        # format demonstrations, even instruction-tuned models can't reliably
+        # produce A/B/C/D letters and a small 2B model on abstract_algebra
+        # (the first MMLU subject under --max-subjects 1) goes to 0/5.
+        extra = ["--max-subjects", "1", "--num-fewshot", "5"] if task == "mmlu" else []
         try:
             r = subprocess.run(
                 [sys.executable, str(SCRIPTS / "eval_accuracy.py"),
