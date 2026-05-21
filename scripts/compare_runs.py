@@ -134,6 +134,72 @@ CLOUD_API_PRICING = {
     "Anthropic Claude Opus 4.7":  75.00,
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Cloud API accuracy numbers
+# ─────────────────────────────────────────────────────────────────────────────
+# Where each cell comes from (verified against the PDFs in Models/Cloud/ on
+# CLOUD_API_ACCURACY_DATE):
+#
+#   - GPT-4o-System-Card.pdf includes only a *medical subset* of MMLU and
+#     explicitly warns (footnote 6) that those scores "should not be compared
+#     with publicly reported benchmarks".  The MMLU value below is from
+#     OpenAI's May-2024 launch announcement instead.
+#   - GPT-4o mini has no standalone system card; MMLU value is from OpenAI's
+#     July-2024 GPT-4o mini announcement.
+#   - Claude Haiku 4.5 and Sonnet 4.5 cards are safety-focused (AUP / RSP
+#     evaluations) and contain no general benchmark numbers.  MMLU values
+#     below come from Anthropic's launch announcements and third-party
+#     leaderboards.
+#   - Claude Opus 4.7's card §8 reports MMMLU (multilingual MMLU) = 91.5%,
+#     the closest in-card analog.  The MMLU value below (92.4%) is from the
+#     standalone Opus 4.7 launch announcement so it stays comparable to the
+#     other rows on the same scale.
+#
+# Re-verify before publication; vendors release point updates that shift
+# scores under the same product name.  Bump CLOUD_API_ACCURACY_DATE on
+# refresh.
+# ─────────────────────────────────────────────────────────────────────────────
+CLOUD_API_ACCURACY_DATE = "2026-05-20"
+CLOUD_API_ACCURACY: dict[str, dict[str, float | None]] = {
+    "OpenAI GPT-4o mini": {
+        # OpenAI GPT-4o mini announcement, July 2024.  No standalone card.
+        "arc_easy": None, "arc_challenge": None,
+        "winogrande": None, "hellaswag": None,
+        "mmlu": 82.0,
+    },
+    "Anthropic Claude Haiku 4.5": {
+        # Anthropic announcement / third-party leaderboards — system card
+        # is safety-focused and reports no general benchmarks.
+        "arc_easy": None, "arc_challenge": None,
+        "winogrande": None, "hellaswag": None,
+        "mmlu": 78.0,
+    },
+    "OpenAI GPT-4o": {
+        # OpenAI tech report / launch announcement, May 2024.  System card's
+        # MMLU is a medical-only subset (see footnote 6 of GPT-4o card) and
+        # is not directly comparable.
+        "arc_easy": None, "arc_challenge": 96.4,
+        "winogrande": 87.0, "hellaswag": 95.3,
+        "mmlu": 88.7,
+    },
+    "Anthropic Claude Sonnet 4.5": {
+        # Anthropic announcement / third-party leaderboards — system card
+        # is safety-focused and reports no general benchmarks.
+        "arc_easy": None, "arc_challenge": None,
+        "winogrande": None, "hellaswag": None,
+        "mmlu": 88.0,
+    },
+    "Anthropic Claude Opus 4.7": {
+        # Anthropic Opus 4.7 launch announcement, April 2026.  The system
+        # card's in-table value is MMMLU (multilingual MMLU) = 91.5%, very
+        # close to this number — keeping the standard-MMLU value here so the
+        # row stays apples-to-apples with the other cloud entries.
+        "arc_easy": None, "arc_challenge": None,
+        "winogrande": None, "hellaswag": None,
+        "mmlu": 92.4,
+    },
+}
+
 # Display names for the five accuracy tasks (used in per-task plot titles/labels)
 TASK_LABELS = {
     "arc_easy":      "ARC-Easy",
@@ -1065,6 +1131,155 @@ def plot_memory_accuracy(df: pd.DataFrame, out_dir: Path):
         )
 
 
+def _cloud_display_name(full_name: str) -> str:
+    """Wrap provider prefix onto its own line so x-axis labels stay compact."""
+    if full_name.startswith("OpenAI "):
+        return "OpenAI\n" + full_name[len("OpenAI "):]
+    if full_name.startswith("Anthropic "):
+        return "Anthropic\n" + full_name[len("Anthropic "):]
+    return full_name
+
+
+def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
+                                   qwen_q8_acc: dict | None = None,
+                                   qwen_q4_acc: dict | None = None):
+    """
+    Grouped-bar accuracy plot mirroring plot_accuracy(), but comparing our
+    locally-measured models (BitNet, Qwen Q8/Q4) against cloud subscription
+    APIs from CLOUD_API_PRICING.
+
+    Cloud values come from CLOUD_API_ACCURACY.  Most providers only publish
+    MMLU, so non-MMLU bars for cloud rows are typically empty (rendered as 0
+    height — visually absent).  Cloud models appear in CLOUD_API_PRICING order
+    (ascending output price).
+    """
+    tasks = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
+    task_labels = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
+    task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
+
+    all_models: list[str] = []
+    model_accs: dict[str, dict] = {}
+    if qwen_q8_acc is not None:
+        label = "Qwen2.5-1.5B\nQ8_0 (ours)"
+        all_models.append(label); model_accs[label] = qwen_q8_acc
+    if qwen_q4_acc is not None:
+        label = "Qwen2.5-1.5B\nQ4_K_M (ours)"
+        all_models.append(label); model_accs[label] = qwen_q4_acc
+    label = "BitNet b1.58 2B4T\n(ours)"
+    all_models.append(label); model_accs[label] = local_acc
+
+    for cloud_name in CLOUD_API_PRICING:
+        if cloud_name not in CLOUD_API_ACCURACY:
+            continue
+        display = _cloud_display_name(cloud_name)
+        all_models.append(display)
+        model_accs[display] = CLOUD_API_ACCURACY[cloud_name]
+
+    x = np.arange(len(all_models))
+    n_tasks = len(tasks)
+    width = 0.15
+    offsets = np.linspace(-(n_tasks - 1) * width / 2, (n_tasks - 1) * width / 2, n_tasks)
+
+    fig, ax = plt.subplots(figsize=(max(14, len(all_models) * 1.6), 6))
+    for i, (task, label, color) in enumerate(zip(tasks, task_labels, task_colors)):
+        vals = []
+        for m in all_models:
+            v = model_accs[m].get(task)
+            vals.append(float(v) if v is not None else 0.0)
+        ax.bar(x + offsets[i], vals, width, label=label, color=color)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(all_models, ha="center")
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_ylim(0, 105)
+    ax.set_title(
+        "Cloud-API vs Self-Hosted Accuracy\n"
+        f"(self-hosted = our local Qwen / BitNet runs; cloud rows = each provider's "
+        f"published evals as of {CLOUD_API_ACCURACY_DATE} — missing bars indicate "
+        f"the provider hasn't published that benchmark)"
+    )
+    ax.legend()
+    fig.tight_layout()
+    path = out_dir / "cloud_accuracy_comparison.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
+def plot_cloud_cost_accuracy(comparison_df: pd.DataFrame, out_dir: Path):
+    """
+    Cost vs accuracy scatter mirroring plot_cost_accuracy(), but extended with
+    cloud APIs from CLOUD_API_PRICING / CLOUD_API_ACCURACY.
+
+    Uses MMLU on the y-axis instead of mean-of-5 because MMLU is the only
+    benchmark consistently published across all cloud providers — a mean-of-5
+    would silently penalize cloud rows whose other four scores aren't public.
+    """
+    QWEN_Q8_NAME = "Qwen2.5-1.5B-Instruct Q8_0"
+    QWEN_Q4_NAME = "Qwen2.5-1.5B-Instruct Q4_K_M"
+    BITNET_NAME = "BitNet b1.58 2B4T"
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+
+    ours_df = comparison_df[comparison_df["source"] == "ours"]
+    for _, row in ours_df.iterrows():
+        cost = row["cost_per_1k_tokens"]
+        mmlu = row["mmlu"]
+        if cost == "" or mmlu == "":
+            continue
+        cost, mmlu = float(cost), float(mmlu)
+        model = row["model"]
+        if model == BITNET_NAME:
+            color, label = BITNET_COLOR, "BitNet b1.58 2B4T (ours)"
+            ann, xy_offset = "BitNet (ours)", (8, -10)
+        elif model == QWEN_Q8_NAME:
+            color, label = QWEN_Q8_COLOR, "Qwen2.5-1.5B Q8_0 (ours)"
+            ann, xy_offset = "Qwen Q8_0 (ours)", (8, -10)
+        elif model == QWEN_Q4_NAME:
+            color, label = QWEN_Q4_COLOR, "Qwen2.5-1.5B Q4_K_M (ours)"
+            ann, xy_offset = "Qwen Q4_K_M (ours)", (8, -22)
+        else:
+            continue
+        ax.scatter(cost, mmlu, facecolors=color, edgecolors=color, marker="D",
+                   s=160, linewidths=1.5, label=label, zorder=3)
+        ax.annotate(ann, (cost, mmlu), textcoords="offset points",
+                    xytext=xy_offset, fontsize=8)
+
+    for cloud_name, price_per_million in CLOUD_API_PRICING.items():
+        acc = CLOUD_API_ACCURACY.get(cloud_name, {}).get("mmlu")
+        if acc is None:
+            continue
+        cost = price_per_million / 1000.0
+        ax.scatter(cost, acc, facecolors=CLOUD_API_COLOR, edgecolors="#222222",
+                   marker="s", s=120, linewidths=1.0, label="Cloud API (output token price)",
+                   zorder=3)
+        ax.annotate(cloud_name, (cost, acc), textcoords="offset points",
+                    xytext=(8, 6), fontsize=8)
+
+    handles, labels_list = ax.get_legend_handles_labels()
+    seen: dict = {}
+    for h, l in zip(handles, labels_list):
+        if l and l not in seen:
+            seen[l] = h
+    ax.legend(seen.values(), seen.keys(), fontsize=9, loc="lower right")
+
+    ax.set_xscale("log")
+    ax.set_xlabel("Cost per 1,000 output tokens (USD, log scale)")
+    ax.set_ylabel("MMLU Accuracy (%)")
+    # Escape $ for matplotlib mathtext (otherwise $...$ italicizes the text).
+    ax.set_title(
+        "Cost vs MMLU Accuracy: Self-Hosted (Qwen / BitNet) vs Cloud APIs\n"
+        f"(self-hosted = AWS c5.xlarge proxy · cloud = published output rate · "
+        f"accuracy/pricing as of {CLOUD_API_ACCURACY_DATE})"
+    )
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    path = out_dir / "cloud_cost_accuracy.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
 def main():
     args = parse_args()
     local_df = load_local(Path(args.results))
@@ -1093,6 +1308,8 @@ def main():
     plot_cloud_cost_comparison(local_df, qwen_q8_df, qwen_q4_df, PLOTS_DIR,
                                 args.hardware_rate, args.electricity_rate)
     plot_memory_accuracy(comparison_df, PLOTS_DIR)
+    plot_cloud_accuracy_comparison(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc)
+    plot_cloud_cost_accuracy(comparison_df, PLOTS_DIR)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
 
