@@ -99,10 +99,10 @@ QWEN_PAPER = {
 }
 
 # Color convention used across all comparison plots:
-#   Other paper baselines  → blue
+#   FP16 paper baselines   → blue   (Qwen FP16 paper grouped with the other FP16 papers)
 #   BitNet                 → orange (paper hatched, ours solid)
-#   Qwen Q8_0              → green  (paper FP16 hatched, ours solid)
-#   Qwen Q4_K_M            → purple (ours only — no paper baseline)
+#   Qwen Q8_0 (ours)       → green
+#   Qwen Q4_K_M (ours)     → purple
 OTHER_COLOR     = "#4C72B0"
 BITNET_COLOR    = "#DD8452"
 QWEN_Q8_COLOR      = "#55A868"
@@ -262,6 +262,10 @@ def build_comparison_df(
     ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
     rows = []
 
+    # Row order: FP16 papers (other baselines → Qwen FP16 paper) → Qwen ours
+    # (Q8, Q4) → BitNet ours → BitNet paper.  Keeps all FP16 papers together at
+    # the top and pushes BitNet to the bottom so the comparison reads
+    # "literature numbers first, our measurements next, BitNet last".
     for name, b in OTHER_BASELINES.items():
         rows.append({
             "model": name,
@@ -274,29 +278,6 @@ def build_comparison_df(
             "energy_cost_per_1k_tokens": "",
             **{f: b[f] for f in ACC_FIELDS},
         })
-
-    rows.append({
-        "model": "BitNet b1.58 2B4T",
-        "source": "paper",
-        "throughput_tokens_s": BITNET_PAPER["throughput_tokens_s"],
-        "peak_rss_mb": BITNET_PAPER["peak_rss_mb"],
-        "cost_per_1k_tokens": round(cost_per_1k(BITNET_PAPER["throughput_tokens_s"], hardware_rate), 6),
-        "energy_cost_per_1k_tokens": "",
-        **{f: BITNET_PAPER[f] for f in ACC_FIELDS},
-    })
-
-    bitnet_tps, bitnet_rss = _bench_row(local_df)
-    our_cost = round(cost_per_1k(bitnet_tps, hardware_rate), 6) if bitnet_tps else ""
-    bitnet_e_cost = energy_cost_per_1k(local_df, electricity_rate)
-    rows.append({
-        "model": "BitNet b1.58 2B4T",
-        "source": "ours",
-        "throughput_tokens_s": round(bitnet_tps, 2) if bitnet_tps is not None else "",
-        "peak_rss_mb": round(bitnet_rss, 0) if bitnet_rss is not None else "",
-        "cost_per_1k_tokens": our_cost,
-        "energy_cost_per_1k_tokens": round(bitnet_e_cost, 6) if bitnet_e_cost is not None else "",
-        **{f: (round(local_acc[f], 2) if local_acc.get(f) is not None else "") for f in ACC_FIELDS},
-    })
 
     rows.append({
         "model": "Qwen2.5 1.5B",
@@ -338,6 +319,29 @@ def build_comparison_df(
             **{f: (round(q4_acc[f], 2) if q4_acc.get(f) is not None else "") for f in ACC_FIELDS},
         })
 
+    bitnet_tps, bitnet_rss = _bench_row(local_df)
+    our_cost = round(cost_per_1k(bitnet_tps, hardware_rate), 6) if bitnet_tps else ""
+    bitnet_e_cost = energy_cost_per_1k(local_df, electricity_rate)
+    rows.append({
+        "model": "BitNet b1.58 2B4T",
+        "source": "ours",
+        "throughput_tokens_s": round(bitnet_tps, 2) if bitnet_tps is not None else "",
+        "peak_rss_mb": round(bitnet_rss, 0) if bitnet_rss is not None else "",
+        "cost_per_1k_tokens": our_cost,
+        "energy_cost_per_1k_tokens": round(bitnet_e_cost, 6) if bitnet_e_cost is not None else "",
+        **{f: (round(local_acc[f], 2) if local_acc.get(f) is not None else "") for f in ACC_FIELDS},
+    })
+
+    rows.append({
+        "model": "BitNet b1.58 2B4T",
+        "source": "paper",
+        "throughput_tokens_s": BITNET_PAPER["throughput_tokens_s"],
+        "peak_rss_mb": BITNET_PAPER["peak_rss_mb"],
+        "cost_per_1k_tokens": round(cost_per_1k(BITNET_PAPER["throughput_tokens_s"], hardware_rate), 6),
+        "energy_cost_per_1k_tokens": "",
+        **{f: BITNET_PAPER[f] for f in ACC_FIELDS},
+    })
+
     return pd.DataFrame(rows)
 
 
@@ -353,29 +357,22 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
     """
     Build the (labels, values, colors, hatches) tuple for a horizontal bar chart.
 
-    Order: other paper baselines → BitNet (paper, ours) → Qwen (paper FP16,
-    Q8 ours, Q4 ours).  Each "ours" row is conditional on local data existing.
-    `metric` selects which field to read from each paper dict / which bench column.
+    Order: other FP16 paper baselines → Qwen paper FP16 → Qwen Q8 ours →
+    Qwen Q4 ours → BitNet ours → BitNet paper.  Each "ours" row is conditional
+    on local data existing.  `metric` selects which field to read from each
+    paper dict / which bench column.
     """
     metric_col = "throughput_tokens_s" if metric == "throughput_tokens_s" else "peak_rss_mb"
     bitnet_tps, bitnet_rss = _bench_row(local_df)
     bitnet_local = bitnet_tps if metric_col == "throughput_tokens_s" else bitnet_rss
 
-    labels = list(OTHER_BASELINES.keys()) + ["BitNet b1.58 2B4T (paper)"]
-    values = [OTHER_BASELINES[m][metric_col] for m in OTHER_BASELINES] + [BITNET_PAPER[metric_col]]
-    colors  = [OTHER_COLOR] * len(OTHER_BASELINES) + [BITNET_COLOR]
-    hatches = [""]          * len(OTHER_BASELINES) + ["///"]
-
-    if bitnet_local is not None:
-        labels.append("BitNet b1.58 2B4T (ours)")
-        values.append(bitnet_local)
-        colors.append(BITNET_COLOR)
-        hatches.append("")
-
-    labels.append("Qwen2.5 1.5B (paper FP16)")
-    values.append(QWEN_PAPER[metric_col])
-    colors.append(QWEN_Q8_COLOR)
-    hatches.append("///")
+    # Qwen FP16 paper is rendered identically to the other FP16 baselines
+    # (same color, no hatch) so they collapse to a single "FP16 baseline (paper)"
+    # legend entry.
+    labels = list(OTHER_BASELINES.keys()) + ["Qwen2.5 1.5B (paper FP16)"]
+    values = [OTHER_BASELINES[m][metric_col] for m in OTHER_BASELINES] + [QWEN_PAPER[metric_col]]
+    colors  = [OTHER_COLOR] * (len(OTHER_BASELINES) + 1)
+    hatches = [""]          * (len(OTHER_BASELINES) + 1)
 
     q8_tps, q8_rss = _bench_row(qwen_q8_df) if qwen_q8_df is not None else (None, None)
     q8_val = q8_tps if metric_col == "throughput_tokens_s" else q8_rss
@@ -393,21 +390,36 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         colors.append(QWEN_Q4_COLOR)
         hatches.append("")
 
+    if bitnet_local is not None:
+        labels.append("BitNet b1.58 2B4T (ours)")
+        values.append(bitnet_local)
+        colors.append(BITNET_COLOR)
+        hatches.append("")
+
+    labels.append("BitNet b1.58 2B4T (paper)")
+    values.append(BITNET_PAPER[metric_col])
+    colors.append(BITNET_COLOR)
+    hatches.append("///")
+
     return labels, values, colors, hatches
 
 
 def _legend_handles(qwen_q8_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | None = None):
     from matplotlib.patches import Patch
+    # All FP16 papers (including Qwen2.5 1.5B) share a single legend entry so
+    # the legend doesn't double-count Qwen as both "FP16 baseline" and a
+    # standalone hatched series.
     handles = [
-        Patch(facecolor=OTHER_COLOR,  edgecolor="#cccccc", label="Other FP16 baseline (paper)"),
-        Patch(facecolor=BITNET_COLOR, hatch="///", edgecolor="#444444", label="BitNet b1.58 2B4T (paper)"),
-        Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc", label="BitNet b1.58 2B4T (ours)"),
-        Patch(facecolor=QWEN_Q8_COLOR,   hatch="///", edgecolor="#444444", label="Qwen2.5 1.5B (paper FP16)"),
+        Patch(facecolor=OTHER_COLOR, edgecolor="#cccccc", label="FP16 baseline (paper)"),
     ]
     if qwen_q8_df is not None:
         handles.append(Patch(facecolor=QWEN_Q8_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q8_0 (ours)"))
     if qwen_q4_df is not None:
         handles.append(Patch(facecolor=QWEN_Q4_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q4_K_M (ours)"))
+    handles += [
+        Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc", label="BitNet b1.58 2B4T (ours)"),
+        Patch(facecolor=BITNET_COLOR, hatch="///", edgecolor="#444444", label="BitNet b1.58 2B4T (paper)"),
+    ]
     return handles
 
 
@@ -455,12 +467,12 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
     configs = [(512, 128), (512, 512), (1, 512)]
     config_labels = [f"p={p} / g={g}" for p, g in configs]
     series = []
-    if has_b:
-        series.append(("BitNet b1.58 2B4T",   local_df,   BITNET_COLOR))
     if has_q8:
         series.append(("Qwen2.5-1.5B Q8_0",   qwen_q8_df,    QWEN_Q8_COLOR))
     if has_q4:
         series.append(("Qwen2.5-1.5B Q4_K_M", qwen_q4_df, QWEN_Q4_COLOR))
+    if has_b:
+        series.append(("BitNet b1.58 2B4T",   local_df,   BITNET_COLOR))
 
     x = np.arange(len(configs))
     width = 0.8 / max(len(series), 1)
@@ -520,9 +532,9 @@ def plot_thread_scaling(out_dir: Path):
     """
     sweeps = []
     for name, path, color in [
-        ("BitNet b1.58 2B4T",   Path("results/bitnet_thread_sweep.csv"),   BITNET_COLOR),
         ("Qwen2.5-1.5B Q8_0",   Path("results/qwen_q8_thread_sweep.csv"),     QWEN_Q8_COLOR),
         ("Qwen2.5-1.5B Q4_K_M", Path("results/qwen_q4_thread_sweep.csv"),  QWEN_Q4_COLOR),
+        ("BitNet b1.58 2B4T",   Path("results/bitnet_thread_sweep.csv"),   BITNET_COLOR),
     ]:
         if path.exists() and path.stat().st_size > 0:
             df = pd.read_csv(path)
@@ -616,15 +628,14 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
     task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
     other_models = list(OTHER_BASELINES.keys())
-    # Column order: other paper baselines, BitNet (paper, ours), Qwen (paper, Q8, Q4)
-    all_models = other_models + [
-        "BitNet 2B4T\n(paper)", "BitNet 2B4T\n(ours)",
-        "Qwen2.5 1.5B\n(paper FP16)",
-    ]
+    # Column order: other FP16 paper baselines → Qwen paper FP16 → Qwen Q8/Q4
+    # ours → BitNet ours → BitNet paper.
+    all_models = other_models + ["Qwen2.5 1.5B\n(paper FP16)"]
     if qwen_q8_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ8_0 (ours)")
     if qwen_q4_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ4_K_M (ours)")
+    all_models += ["BitNet b1.58 2B4T\n(ours)", "BitNet b1.58 2B4T\n(paper)"]
 
     x = np.arange(len(all_models))
     n_tasks = len(tasks)
@@ -635,12 +646,13 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
     for i, (task, label, color) in enumerate(zip(tasks, task_labels, task_colors)):
         vals = (
             [OTHER_BASELINES[m][task] for m in other_models]
-            + [BITNET_PAPER[task], local_acc.get(task) or 0, QWEN_PAPER[task]]
+            + [QWEN_PAPER[task]]
         )
         if qwen_q8_acc is not None:
             vals.append(qwen_q8_acc.get(task) or 0)
         if qwen_q4_acc is not None:
             vals.append(qwen_q4_acc.get(task) or 0)
+        vals += [local_acc.get(task) or 0, BITNET_PAPER[task]]
         ax.bar(x + offsets[i], vals, width, label=label, color=color)
 
     ax.set_xticks(x)
@@ -730,12 +742,12 @@ def _accuracy_scatter(
         source, model = row["source"], row["model"]
         is_qwen_q8_ours    = source == "ours" and model == QWEN_OURS_NAME
         is_qwen_q4_ours = source == "ours" and model == QWEN_Q4_OURS_NAME
-        is_qwen_paper   = source == "paper (FP16)" and model == QWEN_PAPER_NAME
         is_ours = source == "ours"
-        if is_qwen_paper:
-            color, label = QWEN_Q8_COLOR, "Qwen2.5 1.5B (paper FP16)"
-        elif source == "paper (FP16)":
-            color, label = OTHER_COLOR, "Other FP16 baseline (paper)"
+        # Qwen FP16 paper collapses into the generic "FP16 baseline (paper)"
+        # legend entry — same color, same marker, same label as the other
+        # paper FP16 rows.
+        if source == "paper (FP16)":
+            color, label = OTHER_COLOR, "FP16 baseline (paper)"
         elif source == "paper":
             color, label = BITNET_COLOR, "BitNet b1.58 2B4T (paper)"
         elif is_qwen_q4_ours:
@@ -754,14 +766,16 @@ def _accuracy_scatter(
                        facecolors="white", edgecolors=color, marker="o",
                        s=110, linewidths=2, label=label, zorder=3)
 
-        # Short labels: "BitNet (ours)", "Qwen Q8_0 (ours)", "Qwen Q4_K_M (ours)",
-        # "Qwen (paper)".  Keep quant suffix on ours so Q8 and Q4 are distinguishable.
-        ann = (model
-               .replace(" b1.58 2B4T", "")
-               .replace("Qwen2.5-1.5B-Instruct ", "Qwen ")
-               .replace("Qwen2.5 1.5B", "Qwen")
-               .replace(" (FP16)", ""))
-        ann += " (ours)" if is_ours else " (paper)"
+        # Paper annotations use the full model name ("BitNet b1.58 2B4T (paper)",
+        # "Qwen2.5 1.5B (paper)") to match the naming convention in the CSV and
+        # other plots.  Our-measurement annotations stay abbreviated and keep the
+        # quant suffix so Q8 and Q4 are distinguishable at a glance.
+        if is_ours:
+            ann = (model
+                   .replace(" b1.58 2B4T", "")
+                   .replace("Qwen2.5-1.5B-Instruct ", "Qwen ")) + " (ours)"
+        else:
+            ann = model.replace(" (FP16)", "") + " (paper)"
         # Stagger ours offsets so Q8 and Q4 don't overlap when their points sit close.
         if is_qwen_q4_ours:
             xy_offset = (8, -22)
@@ -859,12 +873,12 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         return
 
     rows: list[tuple[str, str, float | None, float | None, float | None]] = []
-    if bitnet_wh is not None:
-        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2, bitnet_usd))
     if qwen_q8_wh is not None:
         rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_Q8_COLOR, qwen_q8_wh, qwen_q8_gco2, qwen_q8_usd))
     if qwen_q4_wh is not None:
         rows.append(("Qwen2.5-1.5B Q4_K_M (ours)", QWEN_Q4_COLOR, qwen_q4_wh, qwen_q4_gco2, qwen_q4_usd))
+    if bitnet_wh is not None:
+        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2, bitnet_usd))
 
     fig, (ax_e, ax_c, ax_d) = plt.subplots(
         1, 3, figsize=(17, max(3.5, len(rows) * 1.2)), sharey=True
@@ -926,9 +940,9 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
     """
     entries: list[tuple[str, float, str, str]] = []  # (label, cost, color, hatch)
     for name, df, color in [
-        ("BitNet b1.58 2B4T",   local_df,   BITNET_COLOR),
         ("Qwen2.5-1.5B Q8_0",   qwen_q8_df,    QWEN_Q8_COLOR),
         ("Qwen2.5-1.5B Q4_K_M", qwen_q4_df, QWEN_Q4_COLOR),
+        ("BitNet b1.58 2B4T",   local_df,   BITNET_COLOR),
     ]:
         if df is None or df.empty:
             continue
@@ -984,13 +998,6 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
     have_bitnet = any(label.startswith("BitNet") for label, *_ in entries)
     have_qwen_q8   = any(label.startswith("Qwen2.5-1.5B Q8_0") for label, *_ in entries)
     have_q4     = any(label.startswith("Qwen2.5-1.5B Q4_K_M") for label, *_ in entries)
-    if have_bitnet:
-        handles += [
-            Patch(facecolor=BITNET_COLOR, hatch="///", edgecolor="#444444",
-                  label="BitNet (ours, AWS proxy)"),
-            Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc",
-                  label="BitNet (ours, local electricity)"),
-        ]
     if have_qwen_q8:
         handles += [
             Patch(facecolor=QWEN_Q8_COLOR, hatch="///", edgecolor="#444444",
@@ -1004,6 +1011,13 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
                   label="Qwen Q4_K_M (ours, AWS proxy)"),
             Patch(facecolor=QWEN_Q4_COLOR, edgecolor="#cccccc",
                   label="Qwen Q4_K_M (ours, local electricity)"),
+        ]
+    if have_bitnet:
+        handles += [
+            Patch(facecolor=BITNET_COLOR, hatch="///", edgecolor="#444444",
+                  label="BitNet (ours, AWS proxy)"),
+            Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc",
+                  label="BitNet (ours, local electricity)"),
         ]
     handles.append(Patch(facecolor=CLOUD_API_COLOR, edgecolor="#cccccc",
                           label="Cloud API (output token price)"))
