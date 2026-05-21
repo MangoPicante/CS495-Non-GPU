@@ -164,9 +164,14 @@ _SERVER_CAPS: dict[str, dict] = {}
 # across vocab sizes up to ~256k.
 _BIAS_VALUE = 100.0
 
-# n_probs for fallback path (older forks return post-bias probs under logit_bias,
-# so we have to search top-K instead).  5000 covers most continuation tokens; the
-# BitNet fork crashes at much larger values.
+# n_probs for the fallback path when `_server_caps()` can't read `n_vocab`
+# from /v1/models (e.g. the endpoint isn't exposed).  Older forks return
+# post-bias probs under logit_bias, so we have to search top-K instead;
+# 5000 covers the vast majority of continuation tokens.  When n_vocab IS
+# known we pass it directly to /completion (n_probs=n_vocab) to get the
+# full distribution exactly — the BitNet fork is happy with that as long
+# as n_probs is positive (negative values cast to (size_t)-1 and segfault
+# the server in examples/server/server.cpp:2374).
 _FALLBACK_N_PROBS = 5000
 
 
@@ -198,7 +203,8 @@ def _detokenize(server: str, tokens: list[int]) -> str:
 
 def _server_caps(server: str) -> dict:
     """
-    Probe the server once to learn how it handles `logit_bias`.
+    Probe the server once to learn how it handles `logit_bias` and read the
+    model's vocabulary size.
 
     Modern llama.cpp returns the *natural* (pre-bias) logprob of the forced
     token when `post_sampling_probs:false` is set — this lets us read
@@ -206,16 +212,21 @@ def _server_caps(server: str) -> dict:
 
     Older forks (e.g. the BitNet llama.cpp fork) apply the bias before
     reporting probs, so the forced token always comes back at prob≈1.0; we
-    must fall back to top-K search instead.
+    must fall back to top-K search instead, and we want K = full vocab so
+    no continuation token is ever truncated.
 
     Detection: force " London" after "The capital of France is".  A natural
     response gives logprob ≈ -7; a post-bias response gives ≈ 0.
 
-    Returns {"bias_natural": bool, "fmt": "new"|"old"}.
+    Vocab size: read from /v1/models → data[0].meta.n_vocab (128256 for
+    BitNet b1.58 2B4T, since it uses the Llama-3 tokenizer).  Falls back to
+    `_FALLBACK_N_PROBS` if the field can't be read.
+
+    Returns {"bias_natural": bool, "fmt": "new"|"old", "n_vocab": int}.
     """
     if server in _SERVER_CAPS:
         return _SERVER_CAPS[server]
-    caps = {"bias_natural": False, "fmt": "old"}
+    caps = {"bias_natural": False, "fmt": "old", "n_vocab": _FALLBACK_N_PROBS}
     try:
         toks = _tokenize(server, " London", add_special=False)
         if not toks:
@@ -244,6 +255,15 @@ def _server_caps(server: str) -> dict:
                 probs = item["probs"]
                 if probs and probs[0].get("prob", 1.0) < 0.5:
                     caps["bias_natural"] = True
+    except Exception:
+        pass
+    # Read n_vocab from the model metadata endpoint, independent of the
+    # bias probe above.  Both upstream and the BitNet fork expose /v1/models.
+    try:
+        models = requests.get(f"{server}/v1/models", timeout=10).json()
+        nv = models.get("data", [{}])[0].get("meta", {}).get("n_vocab")
+        if isinstance(nv, int) and nv > 0:
+            caps["n_vocab"] = nv
     except Exception:
         pass
     _SERVER_CAPS[server] = caps
@@ -396,6 +416,10 @@ def continuation_logprob(
 
     caps = _server_caps(server)
     use_bias = caps["bias_natural"]
+    # When n_vocab was readable from /v1/models we request the entire
+    # distribution (no truncation, no min_logprob fallback).  Otherwise we
+    # fall back to the legacy top-K constant.
+    fallback_n_probs = caps.get("n_vocab") or _FALLBACK_N_PROBS
 
     total = 0.0
     prompt_tokens = list(ctx_tokens)
@@ -414,13 +438,14 @@ def continuation_logprob(
             if lp is None:
                 return float("-inf")
         else:
-            item = _post_completion(server, prompt_tokens, n_probs=_FALLBACK_N_PROBS)
+            item = _post_completion(server, prompt_tokens, n_probs=fallback_n_probs)
             if not item:
                 return float("-inf")
             target_str = _detokenize(server, [target_id])
             lp = _find_token_logprob(item, target_id, target_str)
             if lp is None:
-                # Rarer than top-K: use min seen logprob as a conservative bound.
+                # Should be unreachable when fallback_n_probs == n_vocab; kept
+                # as a defensive bound for the legacy n_probs=5000 path.
                 lp = _min_logprob(item) - 1.0
         total += lp
         prompt_tokens.append(target_id)
