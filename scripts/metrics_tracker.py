@@ -13,11 +13,11 @@ Usage:
         --model ../Models/BitNet/models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
         --threads 4
 
-    # Qwen (or any other llama.cpp build)
+    # Qwen Q8_0 (or any other llama.cpp build)
     python scripts/metrics_tracker.py \
         --llama-dir ../Models/Qwen/llama.cpp \
         --model ../Models/Qwen/qwen2.5-1.5b-instruct-q8_0.gguf \
-        --out results/qwen_step_metrics.csv \
+        --out results/qwen_q8_step_metrics.csv \
         --threads 4
 """
 

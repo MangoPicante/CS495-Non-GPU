@@ -15,7 +15,7 @@ Exit 0 = all checks passed.  Non-zero = at least one failure.
 Usage:
     python scripts/smoke_test.py              # test all three models
     python scripts/smoke_test.py bitnet       # test BitNet only
-    python scripts/smoke_test.py qwen         # test Qwen Q8_0 only
+    python scripts/smoke_test.py qwen-q8      # test Qwen Q8_0 only
     python scripts/smoke_test.py qwen-q4      # test Qwen Q4_K_M only
     make smoke-test
 """
@@ -92,11 +92,11 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 # ── Config ────────────────────────────────────────────────────────────────────
 
 _parser = argparse.ArgumentParser(description="Smoke test for inference models and Phase 4 scripts.")
-_parser.add_argument("model", nargs="?", choices=["bitnet", "qwen", "qwen-q4"], default=None,
+_parser.add_argument("model", nargs="?", choices=["bitnet", "qwen-q8", "qwen-q4"], default=None,
                      help="Which model to test (default: all three)")
 _args = _parser.parse_args()
 RUN_BITNET  = _args.model in (None, "bitnet")
-RUN_QWEN    = _args.model in (None, "qwen")
+RUN_QWEN_Q8 = _args.model in (None, "qwen-q8")
 RUN_QWEN_Q4 = _args.model in (None, "qwen-q4")
 
 ROOT      = Path(__file__).parent.parent
@@ -108,7 +108,7 @@ BITNET_MODEL = BITNET_DIR / "models" / "BitNet-b1.58-2B-4T" / "ggml-model-i2_s.g
 BITNET_CLI   = BITNET_DIR / "build" / "bin" / "Release" / "llama-cli.exe"
 
 QWEN_DIR      = ROOT.parent / "Models" / "Qwen"
-QWEN_MODEL    = QWEN_DIR / "qwen2.5-1.5b-instruct-q8_0.gguf"
+QWEN_Q8_MODEL = QWEN_DIR / "qwen2.5-1.5b-instruct-q8_0.gguf"
 QWEN_Q4_MODEL = QWEN_DIR / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
 QWEN_CLI      = QWEN_DIR / "llama.cpp" / "build" / "bin" / "Release" / "llama-cli.exe"
 
@@ -278,19 +278,19 @@ heading("Model Inference Smoke Tests")
 # applying the chat template (unlike --no-cnv which strips it and returns nothing).
 bitnet_tps  = smoke_model("BitNet b1.58 2B4T",            BITNET_CLI, BITNET_MODEL) \
               if RUN_BITNET else []
-qwen_tps    = smoke_model("Qwen2.5-1.5B-Instruct Q8_0",   QWEN_CLI,   QWEN_MODEL,    ["--single-turn"]) \
-              if RUN_QWEN else []
+qwen_q8_tps    = smoke_model("Qwen2.5-1.5B-Instruct Q8_0",   QWEN_CLI,   QWEN_Q8_MODEL,    ["--single-turn"]) \
+              if RUN_QWEN_Q8 else []
 qwen_q4_tps = smoke_model("Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_CLI,   QWEN_Q4_MODEL, ["--single-turn"]) \
               if RUN_QWEN_Q4 else []
 
-if (bitnet_tps and qwen_tps) or (bitnet_tps and qwen_q4_tps) or (qwen_tps and qwen_q4_tps):
+if (bitnet_tps and qwen_q8_tps) or (bitnet_tps and qwen_q4_tps) or (qwen_q8_tps and qwen_q4_tps):
     heading(f"Cost Comparison  {dim(f'(AWS c5.xlarge @ ${HARDWARE_RATE}/hr)')}")
     hdr = f"{'Model':<35} {'tok/s':>8}   {'$/1k tokens':>13}"
     print(f"  {bold(hdr)}")
     print(f"  {dim('─' * (WIDTH - 2))}")
     for name, tps_list in [
         ("BitNet b1.58 2B4T",            bitnet_tps),
-        ("Qwen2.5-1.5B-Instruct Q8_0",   qwen_tps),
+        ("Qwen2.5-1.5B-Instruct Q8_0",   qwen_q8_tps),
         ("Qwen2.5-1.5B-Instruct Q4_K_M", qwen_q4_tps),
     ]:
         if tps_list:
@@ -366,7 +366,7 @@ heading(f"eval_accuracy.py: Accuracy Smoke  {dim(f'(mmlu / arc_easy / arc_challe
 _eval_configs = []
 for _run_flag, _name, _server_bin, _model_path in [
     (RUN_BITNET,  "BitNet b1.58 2B4T",            BITNET_SERVER, BITNET_MODEL),
-    (RUN_QWEN,    "Qwen2.5-1.5B-Instruct Q8_0",   QWEN_SERVER,   QWEN_MODEL),
+    (RUN_QWEN_Q8, "Qwen2.5-1.5B-Instruct Q8_0",   QWEN_SERVER,   QWEN_Q8_MODEL),
     (RUN_QWEN_Q4, "Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_SERVER,   QWEN_Q4_MODEL),
 ]:
     if not _run_flag:
