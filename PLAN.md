@@ -480,3 +480,101 @@ the comparison — there is no model-size scaling study to do.
       for details, fixes the obsolete `scripts/run_lm_eval.py` reference, the
       wrong remote URL, and the `pip install` instructions that predated the
       Poetry migration.
+
+### Phase 6 — Cross-Architecture Generalization Sweep
+
+Scope: convert the single-CPU threat-to-validity in @FINAL_REPORT.md §6.1
+into a measured result by re-running the benchmark suite on AWS instances
+spanning AVX-512 Intel, AVX2 AMD, and ARM Graviton.  Accuracy is
+hardware-independent at deterministic decoding so accuracy evals are not
+re-run; only `make benchmark` (throughput / memory / energy) executes on
+each remote instance.
+
+Instances and rationale:
+
+| Instance | vCPUs | Arch | ISA | Tests |
+|---|---:|---|---|---|
+| `c5.xlarge` | 4 | Skylake-SP Intel | AVX-512 | The AVX-512 hypothesis: do TL2 and Q8/Q4 AVX-512 paths shift the Pareto ranking? |
+| `c6a.xlarge` | 4 | AMD Zen 3 | AVX2 | Same-ISA-class AMD comparison vs the local i5-9400F (also AVX2) |
+| `c7g.xlarge` | 4 | Graviton3 ARM | Neon/SVE | Cross-ISA: does BitNet's TL2 kernel even compile on ARM, and if so where does it land? |
+| local i5-9400F | 4 | Coffee Lake Intel | AVX2 | Existing baseline (no AVX-512) |
+
+Use spot pricing for all three remote instances (~70% off on-demand);
+benchmarks are short and re-runnable so spot interruption is not a real
+risk.  Document the spot rate used in @FINAL_REPORT.md §6.1.
+
+Tasks:
+
+- [ ] Verify BitNet's Linux build path before any paid instance time.
+      Current setup builds BitNet only on Windows + ClangCL with three
+      local patches.  Read `microsoft/BitNet`'s README and
+      `.github/workflows/` to see whether Linux x86 and Linux ARM are
+      upstream-supported.  If Linux ARM is unsupported by design, drop
+      `c7g.xlarge` from the sweep and report the BitNet-on-ARM question
+      as out of scope; the Qwen rows on `c7g` still tell us something
+      about Q4_K_M's ARM throughput which is independently useful.
+- [ ] Containerize the build.  Author `Dockerfile` at repo root that
+      runs `make bitnet-setup`, `make bitnet-model`, `make qwen-q8-setup`,
+      and `make qwen-q4-model` against a Linux base image (Ubuntu 22.04 or
+      similar).  Goal: one `docker build` + `docker run` per instance
+      reproduces the full benchmark environment without per-distro
+      hand-tuning.  Patches in `patches/` likely need a Linux-equivalent
+      pass; expect to author 1--3 new patches similar to the existing
+      ClangCL ones.
+- [ ] Smoke-test on `c5.xlarge` (on-demand, ~5 minutes, ~$0.02) before
+      committing to the full sweep.  Run `make smoke-test` on the
+      containerized stack.  If BitNet crashes or produces garbage,
+      diagnose Linux-x86 build issues here rather than burning spot time
+      across all three instances.
+- [ ] Stage model weights in S3 to avoid re-downloading 4+ GiB of GGUFs
+      per instance.  `make bitnet-model` and `make qwen-q*-model` should
+      accept an `S3_BUCKET` env var that copies from S3 if set, falls back
+      to Hugging Face otherwise.
+- [ ] Run `make benchmark` on all three remote instances at the existing
+      three `(n_prompt, n_gen)` configs.  Write per-instance bench CSVs
+      to `results/aws_{c5,c6a,c7g}_xlarge/`.  Total compute budget
+      ~$0.60 at spot pricing (3 instances x ~1 hour x ~$0.06/hr).
+- [ ] Extend `scripts/compare_runs.py` with a per-architecture view.  New
+      plot `results/plots/cross_arch_throughput.png` grouped by
+      (architecture, model).  Keep local i5-9400F as the reference row;
+      add c5/c6a/c7g rows where data is available.  The existing
+      single-CPU plots stay as primary; the cross-arch plot is
+      supplementary.
+- [ ] Re-verify the AWS pricing constants in
+      `scripts/compare_runs.py:CLOUD_API_PRICING` and the hardware-rate
+      default ($0.170/hr c5.xlarge on-demand) against current AWS
+      pricing.  Cross-arch sweep gives the report a natural place to
+      report all three on-demand rates in a table.
+- [ ] Update @FINAL_REPORT.md §6.1 with measured cross-architecture
+      results.  Three possible outcomes, each strengthens the report:
+      (a) Pareto ranking stable across architectures (the
+      cleanest result, claims generalize as written);
+      (b) Pareto ranking shifts in a documented way (e.g. AVX-512
+      narrows the BitNet-vs-Q4 gap, ARM widens it), which
+      becomes a substantive new finding for the report's discussion
+      section;
+      (c) BitNet's Linux build is too fragile to run on ARM, which
+      itself is a portability finding worth documenting.
+- [ ] Add a `make aws-benchmark` Makefile target that runs the full
+      remote sweep via SSH against pre-staged spot instances, for
+      reproducibility.  Document the AWS account setup steps in
+      @README.md.
+
+Out of scope for Phase 6: re-running accuracy evals on remote instances
+(unchanged at deterministic decoding), GPU baselines (project is
+explicitly CPU-only), more than three remote instances (diminishing
+returns vs deadline).
+
+Risks:
+
+- BitNet Linux build may require additional patches not yet authored.
+  Mitigation: smoke-test on `c5.xlarge` first; if blocked >1 day, drop
+  BitNet from remote sweep and report Qwen Q8/Q4 cross-arch only (still
+  closes most of the §6.1 threat).
+- ARM build of BitNet's TL2 kernel may not exist upstream.  Mitigation:
+  check before paying; treat ARM-Qwen-only as an acceptable fallback.
+- Spot interruption mid-benchmark.  Mitigation: each `(n_prompt, n_gen)`
+  config writes one CSV row; re-running interrupted configs is cheap.
+- AWS cost overrun if smoke-test phase takes longer than expected.
+  Mitigation: hard budget cap of $20 across the phase; if hit, stop and
+  reassess what's needed for the deadline.

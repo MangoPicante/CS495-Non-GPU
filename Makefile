@@ -58,7 +58,8 @@ OPUS_47_CARD_URL      := https://www.anthropic.com/claude-opus-4-7-system-card
         benchmark-bitnet benchmark-qwen-q8 benchmark-qwen-q4 benchmark \
         benchmark-qwen-q8-on-bitnet-fork \
         benchmark-threads-bitnet benchmark-threads-qwen-q8 benchmark-threads-qwen-q4 benchmark-threads \
-        plots smoke-test smoke-test-bitnet smoke-test-qwen-q8 smoke-test-qwen-q4 \
+        plots marginal-energy \
+        smoke-test smoke-test-bitnet smoke-test-qwen-q8 smoke-test-qwen-q4 \
         system-cards system-cards-bitnet system-cards-qwen system-cards-cloud \
         eval-arc-easy-bitnet eval-arc-easy-qwen-q8 eval-arc-easy-qwen-q4 eval-arc-easy \
         eval-arc-challenge-bitnet eval-arc-challenge-qwen-q8 eval-arc-challenge-qwen-q4 eval-arc-challenge \
@@ -130,6 +131,7 @@ help:
 	@echo "  eval-accuracy-qwen-q4         All tasks, Qwen Q4_K_M only"
 	@echo "  eval-accuracy                 All tasks, all three models"
 	@echo "  plots                         Generate plots + comparison_table.csv from benchmark and accuracy results"
+	@echo "  marginal-energy               Measure CPU idle baseline (90s) and print marginal J/tok per bench row (REPORT.md §4.3)"
 	@echo "  smoke-test                    Verify scripts produce expected outputs (all three models)"
 	@echo "  smoke-test-bitnet             Verify BitNet inference only"
 	@echo "  smoke-test-qwen-q8            Verify Qwen Q8_0 inference only"
@@ -537,6 +539,13 @@ eval-accuracy: eval-accuracy-bitnet eval-accuracy-qwen-q8 eval-accuracy-qwen-q4
 
 plots:
 	$(POETRY) run python scripts/compare_runs.py
+
+# Measure a CPU idle baseline (90s) and subtract it from each bench row's
+# energy_kwh to estimate inference-marginal J/tok.  Closes most of the
+# gap between our total-system numbers and the BitNet paper's
+# inference-only J/tok (REPORT.md §4.3, §6.4).
+marginal-energy:
+	$(POETRY) run python scripts/measure_marginal_energy.py
 
 smoke-test:
 	$(POETRY) run python scripts/smoke_test.py

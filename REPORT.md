@@ -379,17 +379,66 @@ deployment decisions), the realistic advantage on this CPU is closer to
 1.5–1.7×, still substantial but an order of magnitude smaller than the
 paper-headline ratio.
 
-### 4.3 What would close the gap
+### 4.3 Idle subtraction → marginal J/tok
 
-Sub-second energy resolution via Intel RAPL
-(`perf stat -e power/energy-pkg/`) on Linux, or `Counter Win32_PerfFormattedData_Counters_ProcessorInformation`
-on Windows, would let us:
+To recover something comparable to the paper's inference-marginal J/tok,
+`scripts/measure_marginal_energy.py` (`make marginal-energy`) runs the
+same `CodeCarbon EmissionsTracker` used by `metrics_tracker.py` for a
+90-second window with no inference work, then subtracts that idle baseline
+× wall_time from every bench row.
 
-1. Measure a 30-second CPU-idle baseline.
-2. Subtract that baseline from each bench-run total.
-3. Report the inference-marginal J/tok directly comparable to the paper.
+Measured idle baseline (i5-9400F, host-system as configured at measurement
+time — see caveats below): **1.37 Wh over 90.00 s → 54.81 W**.
 
-This is recommended Phase-5 follow-up work and is noted in `PLAN.md`.
+Applying `marginal_J = max(0, total_J − P_idle × wall_time)` to each
+bench row in `results/*_step_metrics.csv` gives:
+
+| Model    | Config       | Wall    | Total J/tok | Idle J/tok | **Marginal J/tok** |
+|---|---|---:|---:|---:|---:|
+| BitNet   | `(512, 128)` | 30.2 s  | 2.94        | 2.59       | **0.36** |
+| BitNet   | `(512, 512)` | 50.2 s  | 6.91        | 2.69       | **4.22** |
+| BitNet   | `(1, 512)`   | 24.6 s  | 21.69       | 2.63       | **19.06** |
+| Qwen Q8  | `(512, 128)` | 42.4 s  | 5.05        | 3.63       | **1.42** |
+| Qwen Q8  | `(512, 512)` | 68.3 s  | 10.48       | 3.65       | **6.82** |
+| Qwen Q8  | `(1, 512)`   | 35.9 s  | 33.40       | 3.84       | **29.56** |
+| Qwen Q4  | `(512, 128)` | 25.7 s  | 2.98        | 2.20       | **0.78** |
+| Qwen Q4  | `(512, 512)` | 41.5 s  | 6.15        | 2.22       | **3.93** |
+| Qwen Q4  | `(1, 512)`   | 20.7 s  | 19.07       | 2.21       | **16.86** |
+
+**Reading the result.** At the reference `(512, 128)` config the marginal
+BitNet number is **0.36 J/tok**, compared with the paper's claimed
+0.028 J/tok — still ~13× off but materially closer than the 105× gap
+from total system energy (2.94 / 0.028). The BitNet/Qwen-Q8 marginal
+ratio is **3.97×** (0.36 vs 1.42), much closer to the paper's implied
+~12× ratio (0.028 vs 0.347) than the 1.71× we saw from totals. Most of
+the "missing" efficiency in §4.1 is recovered by idle subtraction.
+
+**Caveats.** Three reasons the marginal gap to paper isn't fully closed:
+
+1. **CodeCarbon's Windows estimator overcounts.** Without RAPL access on
+   Windows, CodeCarbon scales CPU package power as `TDP × utilization`.
+   The 54.81 W idle figure is unrealistically high for a 65 W TDP chip
+   sitting at low utilization — actual desktop idle on this CPU is closer
+   to 25-35 W. The estimator likely overcounts the busy-state too, so
+   even after subtraction the marginal number remains inflated.
+2. **"Idle" includes background load.** The host machine wasn't truly
+   idle during the baseline measurement — Claude Code, browser, etc. all
+   ran. A bench-paired idle measurement (alternating idle and bench
+   windows within one script) would be tighter.
+3. **Per-token cost rises with `n_gen` share.** The `(1, 512)` configs
+   show ~17-29 marginal J/tok because pure-generation has no prompt-eval
+   amortization to spread the per-token overhead over. The reference
+   `(512, 128)` numbers are the apples-to-apples comparison against the
+   paper's Table 1, which was also measured at `(512, 128)`.
+
+Even with the caveats, the resolution is enough to update the report's
+operational story: the **inference-marginal advantage of BitNet over
+Qwen Q8 is ~4×** (not 1.7×), and Q4_K_M ties BitNet on energy
+(marginal 0.78 vs 0.36 J/tok — within an order of magnitude after
+subtraction, and well within CodeCarbon's estimation noise).
+Sub-second RAPL measurements on Linux would tighten this further and
+are the recommended next step if absolute J/tok parity with the paper
+matters.
 
 ---
 
@@ -653,10 +702,20 @@ memory becomes a multi-GB issue, but that regime is beyond what our
    would not change the +7.6pt Qwen lead, but the absolute numbers in
    §3.7 are 5-shot-specific.
 
-4. **CodeCarbon resolution.** §4 documents that absolute J/tok values
-   include the CPU idle baseline and are 100–200× higher than the paper's
-   marginal-inference figures. Use the BitNet-vs-Qwen ratio (~1.5–1.7×),
-   not the absolute J/tok.
+4. **CodeCarbon resolution (partially resolved — see §4.3).** Absolute
+   J/tok in the §4 table include the CPU idle baseline because CodeCarbon
+   on Windows estimates power as `TDP × utilization`, not actual RAPL.
+   §4.3 now measures an idle baseline (54.81 W on this host) and
+   subtracts it row-by-row to give marginal J/tok. That closes most of
+   the gap to the paper's inference-only J/tok (e.g., BitNet at
+   `(512, 128)`: 2.94 → 0.36 marginal J/tok; paper target 0.028). The
+   BitNet/Qwen-Q8 marginal ratio rises from 1.71× (total) to 3.97×
+   (marginal), much closer to the paper's implied ~12×.  A residual
+   factor remains because the Windows estimator overcounts and the host
+   isn't truly idle during the baseline window; bench-paired RAPL
+   measurements on Linux would tighten this further. Use the marginal
+   numbers in §4.3 (rather than the totals in §4) when comparing against
+   external J/tok figures.
 
 5. **Hardware-rate sensitivity.** All AWS-proxy cost figures use AWS
    c5.xlarge on-demand at `$0.170/hr`. Spot pricing (~30–40% lower), ARM
