@@ -74,10 +74,7 @@ CS495-Non-GPU/
 ├── pyproject.toml                 # Poetry dependency lock
 ├── README.md                      # User-facing quickstart
 ├── PLAN.md                        # This document
-├── BITNET_SUMMARY.md              # Model card + quantization notes (BitNet)
-├── QWEN_SUMMARY.md                # Model card + inference-stack notes (Qwen)
-├── REPORT.md                      # Phase 3 benchmarking report (BitNet headline numbers)
-├── FINAL_REPORT.md                # Phase 4 dashboard: BitNet vs Qwen + paper FP16 baselines
+├── REPORT.md                      # Capstone report (canonical): dashboard + Appendix A (Phase 3 sanity check) + Appendix B (BitNet model card) + Appendix C (Qwen model card)
 │
 ├── patches/                       # Build patches for the pinned BitNet commit
 │   ├── bitnet-clangcl-const.patch
@@ -160,7 +157,7 @@ make benchmark-qwen-q8        # → results/qwen_q8_step_metrics.csv   (Qwen Q8_
 make benchmark-qwen-q4        # → results/qwen_q4_step_metrics.csv   (Qwen Q4_K_M)
 make benchmark                # All three
 
-# Cross-stack sensitivity check (FINAL_REPORT §6.8):
+# Cross-stack sensitivity check (REPORT §6.8):
 make benchmark-qwen-q8-on-bitnet-fork  # Qwen Q8_0 against BitNet's older llama.cpp
                                        # → results/qwen_q8_on_bitnet_fork_step_metrics.csv
 ```
@@ -259,7 +256,7 @@ continuation-scoring paths depending on the llama.cpp build:
   token is rarer than top-5000.
 
 This branching is the only methodology asymmetry between the two models and is
-documented inline in `eval_accuracy.py` and in §6.1 of `QWEN_SUMMARY.md`.
+documented inline in `eval_accuracy.py` and in Appendix C.4 of `REPORT.md`.
 
 Output JSON schema (per task): `accuracy`, `correct`, `total`, plus a
 per-subject breakdown for MMLU.
@@ -309,7 +306,7 @@ from arXiv:2504.12285 Table 1), and writes:
      the only benchmark consistently published across cloud providers).
    - `thread_scaling.png` — throughput vs thread count (1/2/4/6 threads) for
      all three locally measured models, with per-model linear-scaling guides
-     (FINAL_REPORT §5.4).
+     (REPORT §5.4).
 
    The cost– and memory–accuracy scatters share a single `_accuracy_scatter`
    helper so the hollow-vs-filled marker convention and dotted paper→ours
@@ -353,8 +350,8 @@ accuracy cost relative to Q8.
 
 ### Phase 1 — Repository Study
 
-- [x] `BITNET_SUMMARY.md` — paper summary, absmean quantization, STE, FP16 baseline table
-- [x] `QWEN_SUMMARY.md` — Qwen2.5 architecture, Q8_0 quantization, upstream vs fork llama.cpp differences
+- [x] BitNet model card — paper summary, absmean quantization, STE, FP16 baseline table (now `REPORT.md` Appendix B)
+- [x] Qwen model card — Qwen2.5 architecture, Q8_0 / Q4_K_M quantization, upstream-vs-fork llama.cpp differences (now `REPORT.md` Appendix C)
 
 ### Phase 2 — Environment Setup & Model Acquisition
 
@@ -397,14 +394,14 @@ accuracy cost relative to Q8.
       in `comparison_table.csv` and across every plot.  Q4 lands at 24.9
       tok/s and ~$0.0019 / 1k tokens (the cheapest self-hosted row) with a
       ~1pt average-accuracy cost vs Q8.
-- [x] Refresh `FINAL_REPORT.md` with the Q4 row in the headline tables and
+- [x] Refresh `REPORT.md` with the Q4 row in the headline tables and
       a short discussion of the Q8 vs Q4 quantization-sensitivity result.
 - [x] Compare measured energy against FP16 estimates from the literature
-      (`FINAL_REPORT.md` §4 — paper J/tok values cross-referenced; documents
+      (`REPORT.md` §4 — paper J/tok values cross-referenced; documents
       the ~100–200× gap as a methodology mismatch between marginal-inference
       energy and CodeCarbon system-level wall power)
 - [x] Produce final benchmark dashboard (plots + `comparison_table.csv`) in
-      `FINAL_REPORT.md` — executive summary, all 18 plots referenced,
+      `REPORT.md` — executive summary, all 18 plots referenced,
       discussion, threats-to-validity, conclusion
 - [x] Cloud-API cost / accuracy comparison — `CLOUD_API_PRICING` (output token
       $/M for GPT-4o, GPT-4o mini, Claude Haiku/Sonnet/Opus 4.5/4.7) and
@@ -426,12 +423,12 @@ Scope note: this project benchmarks two fixed pre-trained models, not a training
 run. Phase 5 is therefore scoped to *inference-side* tuning and to writing up
 the comparison — there is no model-size scaling study to do.
 
-- [x] Document the `-ub 128` constraint required by the TL2 kernel (REPORT.md §2, Makefile)
+- [x] Document the `-ub 128` constraint required by the TL2 kernel (REPORT.md §5.4 and Appendix B.3, Makefile)
 - [x] Inference-side optimization sweep — thread-count sensitivity at 1/2/4/6
       threads on the i5-9400F.  Dedicated sweep CSVs
       (`results/{bitnet,qwen,qwen_q4}_thread_sweep.csv`) and a new plot
       (`results/plots/thread_scaling.png`) generated via
-      `make benchmark-threads`.  Results and analysis in `FINAL_REPORT.md` §5.4.
+      `make benchmark-threads`.  Results and analysis in `REPORT.md` §5.4.
       Headline findings: BitNet's TL2 kernel cannot run at threads=1
       (`STATUS_STACK_OVERFLOW` regardless of `--ubatch`) and requires
       `--ubatch ≤ 64` at threads=2; BitNet saturates at 4 threads (+1.9%
@@ -441,7 +438,7 @@ the comparison — there is no model-size scaling study to do.
       (~2×) as the two factors in the paper-vs-ours speedup.
 - [x] Characterize where BitNet's efficiency advantage concentrates across the three benchmarked
       workload shapes — prompt-heavy `(512, 128)` vs generation-heavy `(1, 512)` vs long-context
-      `(512, 512)`.  Analysis in `FINAL_REPORT.md` §5.5.  Headline findings:
+      `(512, 512)`.  Analysis in `REPORT.md` §5.5.  Headline findings:
       (i) all three models are essentially workload-shape insensitive on throughput
       (within ~6% of their reference number across all three configs);
       (ii) BitNet's advantage over Qwen Q8 *widens* on pure generation
@@ -463,7 +460,7 @@ the comparison — there is no model-size scaling study to do.
       with zero throughput, a paper row with NaN cost) that breaks the
       invariant.  The BitNet < Qwen Q8 < FP16-baselines cost ordering is
       robust to the rate choice.
-- [x] Write capstone research report to `FINAL_REPORT.md` — methodology,
+- [x] Write capstone research report to `REPORT.md` — methodology,
       headline numbers from `comparison_table.csv`, plots from `results/plots/`,
       and an explicit threats-to-validity section (single-CPU run, the
       logit-bias asymmetry between upstream and BitNet's fork, 0-shot vs
@@ -479,7 +476,7 @@ the comparison — there is no model-size scaling study to do.
 - [x] Clean up repository for reproducibility — `README.md` rewritten as
       an inference-benchmarking front-door (was previously stuck describing
       the project's pre-pivot training framing).  Now lists all three locally
-      run models, points readers at PLAN.md / FINAL_REPORT.md / the Makefile
+      run models, points readers at PLAN.md / REPORT.md / the Makefile
       for details, fixes the obsolete `scripts/run_lm_eval.py` reference, the
       wrong remote URL, and the `pip install` instructions that predated the
       Poetry migration.

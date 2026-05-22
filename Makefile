@@ -315,7 +315,7 @@ benchmark-qwen-q4:
 
 benchmark: benchmark-bitnet benchmark-qwen-q8 benchmark-qwen-q4
 
-# Sensitivity check (FINAL_REPORT §6.8): run Qwen Q8_0 against BitNet's
+# Sensitivity check (REPORT §6.8): run Qwen Q8_0 against BitNet's
 # llama.cpp fork instead of upstream.  Isolates how much of Qwen's measured
 # throughput is attributable to upstream's ~1 year of optimization vs the
 # quantization itself.  The TL2 ternary kernel only activates for i2_s
@@ -334,7 +334,7 @@ benchmark-qwen-q8-on-bitnet-fork:
 # at THREADS=1, 2, 4, 6 (the i5-9400F has 6 cores, no SMT).  Writes to
 # dedicated *_thread_sweep.csv files so the main comparison CSVs stay
 # clean at the THREADS=4 reference condition.  Used by compare_runs.py
-# to produce thread_scaling.png and by FINAL_REPORT §5.4.
+# to produce thread_scaling.png and by REPORT §5.4.
 BITNET_THREAD_SWEEP_OUT  ?= results/bitnet_thread_sweep.csv
 QWEN_Q8_THREAD_SWEEP_OUT    ?= results/qwen_q8_thread_sweep.csv
 QWEN_Q4_THREAD_SWEEP_OUT ?= results/qwen_q4_thread_sweep.csv
@@ -346,7 +346,7 @@ benchmark-threads-bitnet:
 	# crashes); for sweep consistency we use --ubatch 64 across all
 	# three thread counts.  Numbers will be slightly lower than the main
 	# reference (which used --ubatch 128 at threads=4) but the scaling
-	# behavior is what this sweep measures.  Documented in FINAL_REPORT §5.4.
+	# behavior is what this sweep measures.  Documented in REPORT §5.4.
 	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(BITNET_DIR) --model $(MODEL) --threads 2 --out $(BITNET_THREAD_SWEEP_OUT) --no-energy --ubatch 64
 	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(BITNET_DIR) --model $(MODEL) --threads 4 --out $(BITNET_THREAD_SWEEP_OUT) --no-energy --ubatch 64
 	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(BITNET_DIR) --model $(MODEL) --threads 6 --out $(BITNET_THREAD_SWEEP_OUT) --no-energy --ubatch 64

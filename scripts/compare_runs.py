@@ -114,7 +114,7 @@ CLOUD_API_COLOR = "#7F7F7F"
 # ─────────────────────────────────────────────────────────────────────────────
 # These prices are HARDCODED as of CLOUD_API_PRICING_DATE.  Cloud providers
 # change pricing periodically; re-verify against each provider's pricing page
-# before quoting these numbers in FINAL_REPORT.md or any external artifact.
+# before quoting these numbers in REPORT.md or any external artifact.
 # Bump CLOUD_API_PRICING_DATE whenever you refresh the dict so the plot title
 # and stdout note stay accurate.
 #

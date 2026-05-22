@@ -14,7 +14,7 @@ Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B).
 
 Reference workload: `n_prompt=512`, `n_gen=128`, 4 threads on an Intel
 i5-9400F. Full details (methodology, threats to validity, plots) in
-[`FINAL_REPORT.md`](FINAL_REPORT.md).
+[`REPORT.md`](REPORT.md).
 
 | Metric | BitNet | Qwen Q8_0 | Qwen Q4_K_M |
 |---|---:|---:|---:|
@@ -43,10 +43,7 @@ a 2B-parameter model's capability is sufficient.
 |---|---|
 | [`Makefile`](Makefile) | Single source of truth for all reproducible commands. Run `make help` for the full list. |
 | [`PLAN.md`](PLAN.md) | Canonical project reference: dependencies, layout, reproducibility, per-script implementation, phased task list. |
-| [`FINAL_REPORT.md`](FINAL_REPORT.md) | Phase 4/5 dashboard with all measurements, plots, discussion, and threats to validity. |
-| [`BITNET_SUMMARY.md`](BITNET_SUMMARY.md) | BitNet model card and quantization notes (absmean, STE, TL2 kernel). |
-| [`QWEN_SUMMARY.md`](QWEN_SUMMARY.md) | Qwen model card and notes on the upstream-vs-fork `llama.cpp` differences. |
-| [`REPORT.md`](REPORT.md) | Phase 3 BitNet-only sanity check (predates the Qwen comparison). |
+| [`REPORT.md`](REPORT.md) | Canonical capstone report: dashboard, energy/cost analysis, threats to validity, and three appendices (A: Phase 3 sanity check; B: BitNet model card with absmean/STE/TL2; C: Qwen model card with Q8_0/Q4_K_M formats and upstream-vs-fork inference-stack notes). |
 | `scripts/` | `metrics_tracker.py` (`llama-bench` wrapper), `eval_accuracy.py` (lm-eval-harness–style accuracy via `llama-server`), `compare_runs.py` (table + plot generation), `smoke_test.py`. |
 | `results/` | Bench CSVs, accuracy JSONs, `comparison_table.csv`, and ~20 plots in `plots/`. |
 | `patches/` | Three patches BitNet needs to build on Windows + ClangCL. |
@@ -70,7 +67,7 @@ External dependencies (cloned and built into sibling directories by the
 - `../Models/Qwen/llama.cpp/` — `ggml-org/llama.cpp` at commit `1e5ad35d` (upstream, used for both Qwen variants)
 - `../Models/Cloud/` — populated by `make system-cards-cloud` with the
   GPT-4o / Claude 4.5 / Claude Opus 4.7 system-card PDFs used by the
-  cost-vs-cloud comparison (§3.9 of `FINAL_REPORT.md`).
+  cost-vs-cloud comparison (§3.9 of `REPORT.md`).
 
 Reference hardware: Intel Core i5-9400F (6 cores, no SMT), 16 GB RAM,
 Windows 11.
@@ -161,10 +158,7 @@ CS495-Non-GPU/
 ├── pyproject.toml               # Poetry environment
 ├── README.md                    # This file
 ├── PLAN.md                      # Canonical project reference
-├── FINAL_REPORT.md              # Phase 4/5 dashboard
-├── REPORT.md                    # Phase 3 BitNet-only sanity check
-├── BITNET_SUMMARY.md            # BitNet model card
-├── QWEN_SUMMARY.md              # Qwen model card
+├── REPORT.md                    # Canonical capstone report (with appendices A: Phase 3 sanity check, B: BitNet model card, C: Qwen model card)
 ├── patches/                     # ClangCL build patches for BitNet
 ├── scripts/
 │   ├── metrics_tracker.py       # llama-bench wrapper
