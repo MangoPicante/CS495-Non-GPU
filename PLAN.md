@@ -603,12 +603,20 @@ Tasks:
       three `(n_prompt, n_gen)` configs.  Write per-instance bench CSVs
       to `results/aws_{c5,c6a,c7g}_xlarge/`.  Total compute budget
       ~$0.60 at spot pricing (3 instances x ~1 hour x ~$0.06/hr).
-- [ ] Extend `scripts/compare_runs.py` with a per-architecture view.  New
-      plot `results/plots/cross_arch_throughput.png` grouped by
-      (architecture, model).  Keep local i5-9400F as the reference row;
-      add c5/c6a/c7g rows where data is available.  The existing
-      single-CPU plots stay as primary; the cross-arch plot is
-      supplementary.
+- [x] Extend `scripts/compare_runs.py` with a per-architecture view —
+      new `plot_cross_arch_throughput()` reads
+      `results/{,linux_docker_x86,aws_c5_xlarge,aws_c6a_xlarge,aws_c7g_xlarge}/{bitnet,qwen_q8,qwen_q4}_step_metrics.csv`
+      per the `CROSS_ARCH_SOURCES` table, takes the (512,128)
+      reference-config median, and renders a grouped bar chart
+      (`results/plots/cross_arch_throughput.png`) with one bar per
+      architecture inside each model group.  Architectures with no
+      CSV are dropped silently, so the plot grows as the AWS sweep
+      fills in — today (2026-05-24) it shows just Windows-native vs
+      Linux-Docker on the same i5-9400F (validating the container
+      overhead claim from the earlier benchmark); once
+      `make aws-benchmark-{c5,c6a,c7g}` runs, the c5/c6a/c7g bars
+      activate automatically.  Skip-only-baseline branch keeps the
+      plot from being noise when only the Windows row exists.
 - [ ] Re-verify the AWS pricing constants in
       `scripts/compare_runs.py:CLOUD_API_PRICING` and the hardware-rate
       default ($0.170/hr c5.xlarge on-demand) against current AWS

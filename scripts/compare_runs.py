@@ -110,6 +110,29 @@ QWEN_Q4_COLOR   = "#8172B2"
 CLOUD_API_COLOR = "#7F7F7F"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Cross-architecture sources for `plot_cross_arch_throughput` (REPORT §6.1).
+# ─────────────────────────────────────────────────────────────────────────────
+# Each entry points at one (CPU family / OS) result set.  The reference
+# `subdir=None` row reads the canonical results/ CSVs (Windows native on
+# the local i5-9400F); every other entry expects an analogously-named
+# triple (bitnet_step_metrics.csv / qwen_q8_step_metrics.csv /
+# qwen_q4_step_metrics.csv) under results/<subdir>/.
+#
+# Architectures with no data on disk are skipped silently, so this list
+# can outpace the AWS sweep — the plot grows bars as CSVs land.  As of
+# 2026-05-24 only the two i5-9400F rows are populated; c5/c6a/c7g
+# placeholders activate once `make aws-benchmark-{c5,c6a,c7g}` writes
+# their CSVs.
+CROSS_ARCH_SOURCES = [
+    # (label,                            subdir,             color)
+    ("Windows / i5-9400F (AVX2)",        None,               "#4C72B0"),
+    ("Linux Docker / i5-9400F (AVX2)",   "linux_docker_x86", "#7AAEDC"),
+    ("AWS c5.xlarge (Intel AVX-512)",    "aws_c5_xlarge",    "#1F77B4"),
+    ("AWS c6a.xlarge (AMD Zen3 AVX2)",   "aws_c6a_xlarge",   "#D62728"),
+    ("AWS c7g.xlarge (ARM Graviton3)",   "aws_c7g_xlarge",   "#2CA02C"),
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Cloud API output-token pricing
 # ─────────────────────────────────────────────────────────────────────────────
 # These prices are HARDCODED as of CLOUD_API_PRICING_DATE.  Cloud providers
@@ -652,6 +675,106 @@ def plot_thread_scaling(out_dir: Path):
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     path = out_dir / "thread_scaling.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
+def _arch_csv_path(subdir: str | None, filename: str) -> Path:
+    """Resolve a per-architecture CSV path.  subdir=None means the canonical
+    results/<filename> (the Windows-native baseline)."""
+    root = Path(__file__).parent.parent / "results"
+    return root / subdir / filename if subdir else root / filename
+
+
+def _load_arch_throughput(subdir: str | None) -> dict[str, float] | None:
+    """Read the (512, 128) reference-config throughput for each of the three
+    models from a given results subdirectory.  Returns None if no model CSV
+    is readable under that subdir (so the caller can skip the arch entirely)."""
+    out: dict[str, float] = {}
+    for model, filename in [
+        ("BitNet b1.58 2B4T",    "bitnet_step_metrics.csv"),
+        ("Qwen2.5-1.5B Q8_0",    "qwen_q8_step_metrics.csv"),
+        ("Qwen2.5-1.5B Q4_K_M",  "qwen_q4_step_metrics.csv"),
+    ]:
+        path = _arch_csv_path(subdir, filename)
+        if not path.exists() or path.stat().st_size == 0:
+            continue
+        df = pd.read_csv(path)
+        if "n_prompt" not in df.columns or "throughput_tokens_s" not in df.columns:
+            continue
+        ref = df[(df["n_prompt"] == 512) & (df["n_gen"] == 128)]
+        if ref.empty:
+            continue
+        out[model] = float(pd.to_numeric(ref["throughput_tokens_s"]).median())
+    return out or None
+
+
+def plot_cross_arch_throughput(out_dir: Path):
+    """
+    Throughput across (architecture, model) at the (512, 128) reference config.
+
+    Bars grouped by model on the x-axis; one bar per architecture within
+    each group.  Reads from results/{,linux_docker_x86,aws_c5_xlarge,
+    aws_c6a_xlarge,aws_c7g_xlarge}/{bitnet,qwen_q8,qwen_q4}_step_metrics.csv
+    per CROSS_ARCH_SOURCES.  Architectures with no readable CSVs are
+    dropped silently so the plot degrades gracefully while the AWS
+    sweep is being filled in.
+
+    Backs REPORT §6.1 (cross-architecture generalization): if BitNet's
+    advantage over Qwen Q8 holds on AMD AVX2 and ARM Neon, the Pareto
+    ranking claim generalizes; if not, this plot localizes where it
+    breaks.
+    """
+    archs = []
+    for label, subdir, color in CROSS_ARCH_SOURCES:
+        data = _load_arch_throughput(subdir)
+        if data:
+            archs.append((label, color, data))
+
+    if not archs:
+        print("Skipping cross-arch throughput plot: no per-arch CSVs.")
+        return
+    if len(archs) == 1:
+        # Only the baseline is present.  Skip — there's nothing cross-arch
+        # to compare against, and plot_throughput already shows this row.
+        print("Skipping cross-arch throughput plot: only the baseline arch "
+              "has data (run `make aws-benchmark` to populate others).")
+        return
+
+    models = ["BitNet b1.58 2B4T", "Qwen2.5-1.5B Q8_0", "Qwen2.5-1.5B Q4_K_M"]
+    n_models = len(models)
+    n_archs = len(archs)
+    bar_width = 0.8 / n_archs
+    x = list(range(n_models))
+
+    fig, ax = plt.subplots(figsize=(11, 6))
+    max_y = 0.0
+    for i, (label, color, data) in enumerate(archs):
+        offsets = [xi + (i - (n_archs - 1) / 2) * bar_width for xi in x]
+        ys = [data.get(m, 0.0) for m in models]
+        bars = ax.bar(offsets, ys, width=bar_width, color=color,
+                      label=label, edgecolor="black", linewidth=0.5)
+        for bx, by in zip(offsets, ys):
+            if by > 0:
+                ax.annotate(f"{by:.1f}", (bx, by),
+                            textcoords="offset points", xytext=(0, 3),
+                            ha="center", fontsize=7)
+        if ys:
+            max_y = max(max_y, max(ys))
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(models)
+    ax.set_ylabel("Throughput (tokens/s)")
+    ax.set_title(
+        "Cross-architecture throughput at n_prompt=512, n_gen=128\n"
+        "(higher is better; bars within each model = different CPU/OS combinations)"
+    )
+    ax.set_ylim(0, max_y * 1.18 if max_y else 1)
+    ax.legend(loc="upper left", fontsize=9)
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.tight_layout()
+    path = out_dir / "cross_arch_throughput.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"Saved {path}")
@@ -1300,6 +1423,7 @@ def main():
 
     plot_throughput(local_df, PLOTS_DIR, qwen_q8_df, qwen_q4_df)
     plot_thread_scaling(PLOTS_DIR)
+    plot_cross_arch_throughput(PLOTS_DIR)
     plot_memory(local_df, PLOTS_DIR, qwen_q8_df, qwen_q4_df)
     plot_accuracy(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
