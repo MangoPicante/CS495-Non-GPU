@@ -47,8 +47,22 @@ DEFAULT_QWEN_Q4_CSV = Path(__file__).parent.parent / "results" / "qwen_q4_step_m
 DEFAULT_QWEN_Q4_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen_q4.json"
 
 # AWS c5.xlarge on-demand, us-east-1 (4 vCPUs — matches 4-thread benchmark condition)
-# Source: https://instances.vantage.sh/aws/ec2/c5.xlarge (retrieved 2026-05-08)
+# Source: https://instances.vantage.sh/aws/ec2/c5.xlarge (re-verified 2026-05-24:
+# unchanged from the 2026-05-08 snapshot — c5 is mature pricing).
 DEFAULT_HARDWARE_RATE = 0.170
+
+# Per-instance on-demand rates for the cross-architecture sweep
+# (Phase 6).  Not currently consumed by any plot — DEFAULT_HARDWARE_RATE
+# above still drives `cost_per_1k_tokens` in comparison_table.csv — but
+# kept here as the verified source-of-truth for the §6.1 discussion
+# table and for whenever per-arch cost-accuracy plots get added.
+# All us-east-1, Linux, on-demand.  Re-verify before publication.
+# Source: https://instances.vantage.sh/aws/ec2/<instance>   (2026-05-24)
+AWS_ON_DEMAND_RATES = {
+    "c5.xlarge":  0.170,  # Intel Xeon Skylake-SP, AVX-512
+    "c6a.xlarge": 0.153,  # AMD EPYC 7R13 Zen 3, AVX2
+    "c7g.xlarge": 0.145,  # AWS Graviton3 ARM Neoverse-V1, Neon/SVE
+}
 
 # US residential average electricity rate (EIA, 2026 estimate, $/kWh).
 # Used to convert CodeCarbon's energy_kwh into a dollar cost.  Override with
@@ -148,13 +162,18 @@ CROSS_ARCH_SOURCES = [
 #   OpenAI:     https://openai.com/api/pricing
 #   Anthropic:  https://www.anthropic.com/pricing#api
 # ─────────────────────────────────────────────────────────────────────────────
-CLOUD_API_PRICING_DATE = "2026-05-15"
+CLOUD_API_PRICING_DATE = "2026-05-24"
 CLOUD_API_PRICING = {
     "OpenAI GPT-4o mini":          0.60,
     "Anthropic Claude Haiku 4.5":  5.00,
     "OpenAI GPT-4o":              10.00,
     "Anthropic Claude Sonnet 4.5": 15.00,
-    "Anthropic Claude Opus 4.7":  75.00,
+    # Opus 4.7 was cut from $75 to $25 between the original 2026-05-15
+    # snapshot and the 2026-05-24 re-verification (Anthropic aligned
+    # the entire Opus 4.5+ family at $25 output; the old $75 was Opus
+    # 4.1's number).  Re-verify against the docs.claude.com/pricing
+    # table before publication — Anthropic refreshes periodically.
+    "Anthropic Claude Opus 4.7":  25.00,
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

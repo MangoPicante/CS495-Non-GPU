@@ -617,11 +617,30 @@ Tasks:
       `make aws-benchmark-{c5,c6a,c7g}` runs, the c5/c6a/c7g bars
       activate automatically.  Skip-only-baseline branch keeps the
       plot from being noise when only the Windows row exists.
-- [ ] Re-verify the AWS pricing constants in
+- [x] Re-verify the AWS pricing constants in
       `scripts/compare_runs.py:CLOUD_API_PRICING` and the hardware-rate
       default ($0.170/hr c5.xlarge on-demand) against current AWS
       pricing.  Cross-arch sweep gives the report a natural place to
       report all three on-demand rates in a table.
+      Verified 2026-05-24:
+      * **Anthropic Claude Opus 4.7 output cut 3×: $75 → $25 / MTok.**
+        Entire Opus 4.5+ family aligned at $25 (the old $75 was Opus
+        4.1's number; we'd been quoting it accidentally).  Haiku 4.5
+        ($5) and Sonnet 4.5 ($15) unchanged. `CLOUD_API_PRICING` and
+        `CLOUD_API_PRICING_DATE` updated; the cloud cost plots
+        (`cloud_cost_comparison.png`, `cloud_cost_accuracy.png`) move
+        Opus visibly closer to Sonnet on the log axis.
+      * OpenAI GPT-4o ($10) and GPT-4o mini ($0.60) unchanged.
+      * AWS on-demand us-east-1 Linux rates (vantage.sh): c5.xlarge
+        $0.170 (unchanged), c6a.xlarge **$0.153**, c7g.xlarge
+        **$0.145**.  Captured as the new `AWS_ON_DEMAND_RATES` dict in
+        `compare_runs.py` next to `DEFAULT_HARDWARE_RATE` — not yet
+        consumed by any plot, but ready for the per-arch cost work
+        and for the §6.1 discussion table.  Note: PLAN.md's earlier
+        "$0.1156/hr c7g" reference in the Phase 5 cost-sensitivity
+        bullet was stale; the cost-ordering invariant the bullet
+        proves is unaffected (any per-row rescaling preserves the
+        ordering by construction).
 - [ ] Update REPORT.md §6.1 with measured cross-architecture
       results.  Three possible outcomes, each strengthens the report:
       (a) Pareto ranking stable across architectures (the
