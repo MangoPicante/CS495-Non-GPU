@@ -67,6 +67,8 @@ OPUS_47_CARD_URL      := https://www.anthropic.com/claude-opus-4-7-system-card
         eval-winogrande-bitnet eval-winogrande-qwen-q8 eval-winogrande-qwen-q4 eval-winogrande \
         eval-hellaswag-bitnet eval-hellaswag-qwen-q8 eval-hellaswag-qwen-q4 eval-hellaswag \
         eval-accuracy-bitnet eval-accuracy-qwen-q8 eval-accuracy-qwen-q4 eval-accuracy \
+        docker-build-x86 docker-build-arm \
+        aws-bootstrap-c7g aws-benchmark-c5 aws-benchmark-c6a aws-benchmark-c7g aws-benchmark \
         clean nuke
 
 help:
@@ -143,6 +145,15 @@ help:
 	@echo "  system-cards-qwen             Qwen2.5 technical report (arXiv:2412.15115) -> \$$(QWEN_DIR)"
 	@echo "  system-cards-cloud            GPT-4o + Claude 4.5/4.7 system cards -> \$$(CLOUD_DIR)"
 	@echo ""
+	@echo "AWS cross-architecture sweep (Phase 6, requires SSH access):"
+	@echo "  docker-build-x86              Build cs495-non-gpu:x86 (linux/amd64) locally"
+	@echo "  docker-build-arm              Build cs495-non-gpu:arm (linux/arm64) locally (slow under qemu)"
+	@echo "  aws-bootstrap-c7g             Rsync repo to c7g.xlarge and build the arm image natively there"
+	@echo "  aws-benchmark-c5              Ship x86 image to c5.xlarge, run make benchmark, pull CSVs back"
+	@echo "  aws-benchmark-c6a             Same as c5 but against c6a.xlarge (AMD Zen 3)"
+	@echo "  aws-benchmark-c7g             Run make benchmark on c7g.xlarge using the natively built arm image"
+	@echo "  aws-benchmark                 All three architectures sequentially"
+	@echo ""
 	@echo "Housekeeping:"
 	@echo "  clean               Remove results/plots/ and cached .pyc files"
 	@echo "  nuke                clean + remove the Poetry virtualenv"
@@ -152,6 +163,11 @@ help:
 	@echo "  QWEN_DIR=../Other/Path     (default: $(QWEN_DIR))"
 	@echo "  THREADS=8                  (default: $(THREADS))"
 	@echo "  LIMIT=100                  (default: $(LIMIT), applies to eval targets)"
+	@echo "  C5_HOST=ec2-...            Public DNS / IP for the c5.xlarge spot instance (aws-benchmark-c5)"
+	@echo "  C6A_HOST=ec2-...           Same, for c6a.xlarge (aws-benchmark-c6a)"
+	@echo "  C7G_HOST=ec2-...           Same, for c7g.xlarge (aws-benchmark-c7g)"
+	@echo "  AWS_KEY=~/.ssh/key.pem     SSH private key for AWS instances (default: $(AWS_KEY))"
+	@echo "  AWS_USER=ubuntu            SSH user (default: $(AWS_USER))"
 
 # ── Python environment (Poetry) ───────────────────────────────────────────────
 
@@ -662,6 +678,123 @@ system-cards-cloud:
 	    || $(CURL) -o $(CLOUD_DIR)/Claude-Sonnet-4-5-System-Card.pdf $(SONNET_45_CARD_URL)
 	@[ -f $(CLOUD_DIR)/Claude-Opus-4-7-System-Card.pdf ] \
 	    || $(CURL) -o $(CLOUD_DIR)/Claude-Opus-4-7-System-Card.pdf $(OPUS_47_CARD_URL)
+
+# ── AWS cross-architecture benchmark sweep (Phase 6) ─────────────────────────
+#
+# Drives `make benchmark` inside the cs495-non-gpu Docker container on
+# pre-staged AWS instances spanning AVX-512 Intel, AVX2 AMD, and ARM
+# Graviton.  Pre-conditions:
+#   * Three running instances (c5.xlarge, c6a.xlarge, c7g.xlarge), each
+#     with Docker installed (Deep Learning AMI Ubuntu 22.04 ships it; on
+#     a bare Ubuntu AMI, `sudo apt install docker.io && sudo usermod
+#     -aG docker ubuntu` and re-login).
+#   * SSH keypair configured: private key at $(AWS_KEY), instance set up
+#     to accept it for user $(AWS_USER).
+#   * $(C5_HOST), $(C6A_HOST), $(C7G_HOST) point at the instances'
+#     public DNS names (or IPs).
+#
+# Image transfer strategy:
+#   * x86 instances: build the image locally (`make docker-build-x86`),
+#     then `docker save | ssh ... docker load`.  Image is ~6 GB
+#     compressed; expect ~5-15 min over a typical home upload.
+#   * ARM instance: build the image natively on the c7g host instead
+#     of pushing — qemu emulation of arm64 on an x86 build host is far
+#     too slow for the BitNet TL1 kernel codegen.  `aws-bootstrap-c7g`
+#     rsyncs the repo and runs `docker build` over SSH.
+#
+# Output lands in:
+#   results/aws_c5_xlarge/{bitnet,qwen_q8,qwen_q4}_step_metrics.csv
+#   results/aws_c6a_xlarge/...
+#   results/aws_c7g_xlarge/...
+
+AWS_KEY              ?= ~/.ssh/cs495-aws.pem
+AWS_USER             ?= ubuntu
+AWS_IMAGE_X86        ?= cs495-non-gpu:x86
+AWS_IMAGE_ARM        ?= cs495-non-gpu:arm
+AWS_REMOTE_DIR       ?= /tmp/cs495
+
+# Each *_HOST must be set by the user (`make aws-benchmark C5_HOST=...`).
+C5_HOST              ?=
+C6A_HOST             ?=
+C7G_HOST             ?=
+
+# Local image build helpers — wrap the buildx commands in the docker
+# image header.  These are what `aws-benchmark-c5` / `-c6a` depend on
+# so the x86 image is up to date before shipping.
+docker-build-x86:
+	docker buildx build --platform=linux/amd64 --load -t $(AWS_IMAGE_X86) .
+
+docker-build-arm:
+	docker buildx build --platform=linux/arm64 --load -t $(AWS_IMAGE_ARM) .
+
+# Internal helper: SSH command line.  Keeps the per-target recipes
+# from repeating the key/user flags.
+AWS_SSH := ssh -o StrictHostKeyChecking=accept-new -i $(AWS_KEY)
+AWS_SCP := scp -o StrictHostKeyChecking=accept-new -i $(AWS_KEY)
+
+# Internal: ship a locally-built image to a remote host via the
+# docker-save → ssh-pipe → docker-load idiom.  $1 = image tag, $2 = host.
+define ship_image
+	@echo "==> Shipping $1 to $2 (~6 GB compressed; this is the slow step)"
+	docker save $1 | gzip -1 | $(AWS_SSH) $(AWS_USER)@$2 'gunzip | docker load'
+endef
+
+# Internal: run `make benchmark` in the container on a remote host with
+# output redirected via env vars to a host-mounted dir.  Then scp the
+# CSVs back to results/$3/.  $1 = image, $2 = host, $3 = local subdir.
+define run_remote_benchmark
+	@echo "==> Running benchmark on $2"
+	$(AWS_SSH) $(AWS_USER)@$2 '\
+	    rm -rf $(AWS_REMOTE_DIR)/out && mkdir -p $(AWS_REMOTE_DIR)/out && \
+	    docker run --rm \
+	        -e BITNET_DIR=/Models/BitNet \
+	        -e QWEN_DIR=/Models/Qwen \
+	        -e BITNET_BENCH_OUT=results/out/bitnet_step_metrics.csv \
+	        -e QWEN_Q8_BENCH_OUT=results/out/qwen_q8_step_metrics.csv \
+	        -e QWEN_Q4_BENCH_OUT=results/out/qwen_q4_step_metrics.csv \
+	        -v $(AWS_REMOTE_DIR)/out:/capstone/results/out \
+	        $1 make benchmark'
+	@mkdir -p results/$3
+	$(AWS_SCP) $(AWS_USER)@$2:'$(AWS_REMOTE_DIR)/out/*.csv' results/$3/
+	@echo "==> $2: results landed in results/$3/"
+endef
+
+# Build the ARM image natively on the c7g instance via rsync + docker
+# build.  Avoids qemu emulation on the x86 build host.  Re-runnable;
+# rsync skips unchanged files and docker layer cache short-circuits
+# the heavy steps on the second invocation.
+aws-bootstrap-c7g:
+	@test -n "$(C7G_HOST)" || (echo "ERROR: C7G_HOST must be set" && exit 1)
+	@echo "==> Syncing repo to $(C7G_HOST):$(AWS_REMOTE_DIR)/repo"
+	$(AWS_SSH) $(AWS_USER)@$(C7G_HOST) 'mkdir -p $(AWS_REMOTE_DIR)/repo'
+	rsync -az -e "$(AWS_SSH)" \
+	    --exclude='.git' --exclude='.venv' --exclude='results' \
+	    --exclude='docker-*.log' --exclude='__pycache__' \
+	    ./ $(AWS_USER)@$(C7G_HOST):$(AWS_REMOTE_DIR)/repo/
+	@echo "==> Building $(AWS_IMAGE_ARM) on $(C7G_HOST) (~slow; native arm64 build)"
+	$(AWS_SSH) $(AWS_USER)@$(C7G_HOST) \
+	    'cd $(AWS_REMOTE_DIR)/repo && docker build -t $(AWS_IMAGE_ARM) .'
+
+# Per-instance benchmark targets.  c5/c6a both use the x86 image
+# (shipped); c7g uses the arm image (built remotely via bootstrap).
+aws-benchmark-c5: docker-build-x86
+	@test -n "$(C5_HOST)" || (echo "ERROR: C5_HOST must be set" && exit 1)
+	$(call ship_image,$(AWS_IMAGE_X86),$(C5_HOST))
+	$(call run_remote_benchmark,$(AWS_IMAGE_X86),$(C5_HOST),aws_c5_xlarge)
+
+aws-benchmark-c6a: docker-build-x86
+	@test -n "$(C6A_HOST)" || (echo "ERROR: C6A_HOST must be set" && exit 1)
+	$(call ship_image,$(AWS_IMAGE_X86),$(C6A_HOST))
+	$(call run_remote_benchmark,$(AWS_IMAGE_X86),$(C6A_HOST),aws_c6a_xlarge)
+
+aws-benchmark-c7g: aws-bootstrap-c7g
+	$(call run_remote_benchmark,$(AWS_IMAGE_ARM),$(C7G_HOST),aws_c7g_xlarge)
+
+# Full sweep — runs sequentially.  Spot interruption tolerance: each
+# (n_prompt, n_gen) config writes one CSV row, so partial failures
+# leave usable data behind and re-running picks up cleanly.
+aws-benchmark: aws-benchmark-c5 aws-benchmark-c6a aws-benchmark-c7g
+	@echo "==> All three architectures complete; rerun \`make plots\` to refresh figures"
 
 # ── Housekeeping ───────────────────────────────────────────────────────────────
 
