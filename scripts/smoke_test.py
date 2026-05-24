@@ -103,17 +103,28 @@ ROOT      = Path(__file__).parent.parent
 SCRIPTS   = ROOT / "scripts"
 RESULTS   = ROOT / "results"
 
-BITNET_DIR   = ROOT.parent / "Models" / "BitNet"
+BITNET_DIR   = Path(os.environ.get("BITNET_DIR", ROOT.parent / "Models" / "BitNet"))
 BITNET_MODEL = BITNET_DIR / "models" / "BitNet-b1.58-2B-4T" / "ggml-model-i2_s.gguf"
-BITNET_CLI   = BITNET_DIR / "build" / "bin" / "Release" / "llama-cli.exe"
 
-QWEN_DIR      = ROOT.parent / "Models" / "Qwen"
+QWEN_DIR      = Path(os.environ.get("QWEN_DIR", ROOT.parent / "Models" / "Qwen"))
 QWEN_Q8_MODEL = QWEN_DIR / "qwen2.5-1.5b-instruct-q8_0.gguf"
 QWEN_Q4_MODEL = QWEN_DIR / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
-QWEN_CLI      = QWEN_DIR / "llama.cpp" / "build" / "bin" / "Release" / "llama-cli.exe"
 
-BITNET_SERVER    = BITNET_DIR / "build" / "bin" / "Release" / "llama-server.exe"
-QWEN_SERVER      = QWEN_DIR / "llama.cpp" / "build" / "bin" / "Release" / "llama-server.exe"
+
+def _resolve_binary(build_root: Path, name: str) -> Path:
+    """Return the built llama.cpp binary path, preferring the Windows
+    `build/bin/Release/<name>.exe` layout and falling back to the
+    Linux/macOS `build/bin/<name>` layout — mirrors metrics_tracker.py."""
+    win = build_root / "build" / "bin" / "Release" / f"{name}.exe"
+    if win.exists():
+        return win
+    return build_root / "build" / "bin" / name
+
+
+BITNET_CLI    = _resolve_binary(BITNET_DIR, "llama-cli")
+QWEN_CLI      = _resolve_binary(QWEN_DIR / "llama.cpp", "llama-cli")
+BITNET_SERVER = _resolve_binary(BITNET_DIR, "llama-server")
+QWEN_SERVER   = _resolve_binary(QWEN_DIR / "llama.cpp", "llama-server")
 EVAL_PORT        = 8081
 EVAL_SERVER_URL  = f"http://127.0.0.1:{EVAL_PORT}"
 EVAL_SMOKE_OUT   = RESULTS / "smoke_accuracy.json"  # separate from main results; deleted each run
@@ -195,7 +206,13 @@ def smoke_model(name: str, cli: Path, model: Path,
     """Run all inference test cases for one model; return list of tps values."""
     subheading(name)
     kv("Model", model.name)
-    kv("CLI",   f"{cli.name}  {dim('(' + cli.parent.parent.parent.parent.name + ')')}")
+    # cli lives at <dir>/build/bin/Release/llama-cli.exe (Windows) or
+    # <dir>/build/bin/llama-cli (Linux/macOS); walk up to the first
+    # ancestor that isn't named "Release"/"bin"/"build" for the label.
+    _dir = cli.parent
+    while _dir.name in ("Release", "bin", "build"):
+        _dir = _dir.parent
+    kv("CLI",   f"{cli.name}  {dim('(' + _dir.name + ')')}")
     kv("Pricing", f"AWS c5.xlarge  {dim('·')}  ${HARDWARE_RATE}/hr")
 
     if not model.exists():

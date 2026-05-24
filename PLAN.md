@@ -54,11 +54,14 @@ threads used), 16 GB RAM, Windows 11.
 
 ### Build Patches (BitNet, applied automatically by `make bitnet-patch`)
 
-Three patches in `patches/` are required at the pinned BitNet commit when
-building with ClangCL 18+ on Windows:
+Three patches in `patches/` are required at the pinned BitNet commit on
+both Windows (ClangCL 18+) and Linux (clang-18 from apt.llvm.org):
 
 - `bitnet-clangcl-const.patch` — adds `const` to a non-const pointer init in
-  `src/ggml-bitnet-mad.cpp:811`; ClangCL 20+ treats this as a hard error.
+  `src/ggml-bitnet-mad.cpp:811`. Originally found under ClangCL 20+;
+  empirically required on Linux clang-18 as well (verified during
+  Phase 6 Docker bring-up — the misleading name is kept for git history,
+  the Dockerfile applies it unconditionally).
 - `llama-chrono.patch` — adds missing `#include <chrono>` in
   `3rdparty/llama.cpp/common/{common,log}.cpp`.
 - `llama-chrono-examples.patch` — same `<chrono>` fix in
@@ -483,7 +486,7 @@ the comparison — there is no model-size scaling study to do.
 
 ### Phase 6 — Cross-Architecture Generalization Sweep
 
-Scope: convert the single-CPU threat-to-validity in @FINAL_REPORT.md §6.1
+Scope: convert the single-CPU threat-to-validity in REPORT.md §6.1
 into a measured result by re-running the benchmark suite on AWS instances
 spanning AVX-512 Intel, AVX2 AMD, and ARM Graviton.  Accuracy is
 hardware-independent at deterministic decoding so accuracy evals are not
@@ -501,31 +504,80 @@ Instances and rationale:
 
 Use spot pricing for all three remote instances (~70% off on-demand);
 benchmarks are short and re-runnable so spot interruption is not a real
-risk.  Document the spot rate used in @FINAL_REPORT.md §6.1.
+risk.  Document the spot rate used in REPORT.md §6.1.
 
 Tasks:
 
-- [ ] Verify BitNet's Linux build path before any paid instance time.
-      Current setup builds BitNet only on Windows + ClangCL with three
-      local patches.  Read `microsoft/BitNet`'s README and
-      `.github/workflows/` to see whether Linux x86 and Linux ARM are
-      upstream-supported.  If Linux ARM is unsupported by design, drop
-      `c7g.xlarge` from the sweep and report the BitNet-on-ARM question
-      as out of scope; the Qwen rows on `c7g` still tell us something
-      about Q4_K_M's ARM throughput which is independently useful.
-- [ ] Containerize the build.  Author `Dockerfile` at repo root that
-      runs `make bitnet-setup`, `make bitnet-model`, `make qwen-q8-setup`,
-      and `make qwen-q4-model` against a Linux base image (Ubuntu 22.04 or
-      similar).  Goal: one `docker build` + `docker run` per instance
-      reproduces the full benchmark environment without per-distro
-      hand-tuning.  Patches in `patches/` likely need a Linux-equivalent
-      pass; expect to author 1--3 new patches similar to the existing
-      ClangCL ones.
-- [ ] Smoke-test on `c5.xlarge` (on-demand, ~5 minutes, ~$0.02) before
-      committing to the full sweep.  Run `make smoke-test` on the
-      containerized stack.  If BitNet crashes or produces garbage,
-      diagnose Linux-x86 build issues here rather than burning spot time
-      across all three instances.
+- [x] Verify BitNet's Linux build path before any paid instance time —
+      `microsoft/BitNet` officially supports both Linux x86 and Linux ARM
+      for BitNet-b1.58-2B-4T (README "Official Models" table:
+      `I2_S` available on both arches; `TL2` on x86 only, `TL1` on ARM).
+      Build prerequisites are the same as our local Windows path minus
+      the Visual Studio dependencies: Python ≥3.9, CMake ≥3.22, Clang ≥18
+      (installed via `bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"`
+      on Debian/Ubuntu).  Build command on Linux is identical:
+      `python setup_env.py -md models/BitNet-b1.58-2B-4T -q i2_s`.
+      Implications for the sweep:
+      (i) `c5.xlarge` (x86) uses the same TL2 kernel as our local i5-9400F
+          — a pure AVX2 → AVX-512 hardware comparison;
+      (ii) `c7g.xlarge` (ARM Graviton3) will use TL1, not TL2 — the
+           cross-arch numbers compare different kernel implementations,
+           not just different ISAs, and the report's discussion needs to
+           call that out as a confound rather than a clean ISA-only result.
+      Local-patch portability: the two `llama-chrono*.patch` files
+      address a stdlib issue in upstream llama.cpp at our pinned commit
+      and apply identically on Linux clang.  `bitnet-clangcl-const.patch`
+      addresses a ClangCL-only hard error; needs re-testing on Linux
+      clang and may be unnecessary there.
+- [x] Containerize the build — `Dockerfile` + `.dockerignore` at repo
+      root.  Ubuntu 22.04 base, Python 3.11 (via deadsnakes PPA), clang
+      18 (via apt.llvm.org), Poetry, and the HuggingFace CLI.  Bypasses
+      the Windows-only `bitnet-setup` / `qwen-q8-setup` Makefile targets
+      (which use `-T ClangCL` and `bin/Release/`) and runs the build
+      steps directly: BitNet via the upstream `setup_env.py` (its
+      official cross-platform path; picks TL2 on x86, TL1 on ARM),
+      llama.cpp via straight `cmake -DGGML_NATIVE=ON`.  Both pinned to
+      the existing commits.  Layered for caching: deps → BitNet build →
+      llama.cpp build → poetry → code, so iterating on code re-runs only
+      the last layer.  GGUFs are baked in (~5 GB image) for one-shot
+      reproducibility; mounting them as a volume is a documented
+      alternative.  `make benchmark` works unmodified inside the
+      container because `metrics_tracker.py` already falls back to
+      `build/bin/llama-bench` on non-Windows hosts.  Only the two
+      `llama-chrono*.patch` files apply on Linux clang; the
+      `bitnet-clangcl-const.patch` is skipped (ClangCL-specific) — no
+      new Linux-equivalent patches needed at the pinned commit, but the
+      Dockerfile header documents the decision so a future clang
+      regression can be patched without re-investigating.
+      Build / run:
+      `docker buildx build --platform=linux/amd64 -t cs495-non-gpu:x86 .`
+      `docker run --rm -v "$(pwd)/results:/capstone/results" cs495-non-gpu:x86 make benchmark`
+- [x] Smoke-test the containerized x86 build locally before
+      committing to a paid instance.  Ran `docker buildx --platform=linux/amd64`
+      + `make smoke-test` on the local i5-9400F via Docker Desktop's
+      WSL2 backend, which exercises the exact same Linux-x86 build
+      path a `c5.xlarge` would.  47/48 checks pass (one flaky raw
+      no-seed `llama-cli "What is 2+2?"` completion on BitNet; rerun
+      hit "4" cleanly).  Two surprises caught here rather than on
+      paid instance time:
+      (i) `bitnet-clangcl-const.patch` is required on Linux clang-18
+          too, not just ClangCL (Dockerfile now applies it
+          unconditionally; PLAN.md "Build Patches" section corrected);
+      (ii) `scripts/smoke_test.py` hardcoded the Windows
+          `build/bin/Release/llama-cli.exe` path and needed the same
+          `build/bin/<name>` fallback `metrics_tracker.py` already had.
+      Headline finding to fold into REPORT.md §6.1 once the full
+      benchmark runs: **on the same i5-9400F**, BitNet's smoke
+      throughput jumps from ~21 tok/s (Windows native) to ~92 tok/s
+      (Linux x86 via Docker/WSL2) — a ~4.4× speedup attributable
+      purely to OS/toolchain.  Numbers are from 16-token raw `llama-cli`
+      samples and need confirmation from `make benchmark` at the
+      canonical three configs before going in the report.
+- [ ] Smoke-test on `c5.xlarge` itself (on-demand, ~5 minutes, ~$0.02)
+      as a final sanity check before the spot sweep.  Same
+      command, same expected outcome — local Docker covered the
+      build-correctness risk; this run only confirms the AWS host
+      is functioning.
 - [ ] Stage model weights in S3 to avoid re-downloading 4+ GiB of GGUFs
       per instance.  `make bitnet-model` and `make qwen-q*-model` should
       accept an `S3_BUCKET` env var that copies from S3 if set, falls back
@@ -545,7 +597,7 @@ Tasks:
       default ($0.170/hr c5.xlarge on-demand) against current AWS
       pricing.  Cross-arch sweep gives the report a natural place to
       report all three on-demand rates in a table.
-- [ ] Update @FINAL_REPORT.md §6.1 with measured cross-architecture
+- [ ] Update REPORT.md §6.1 with measured cross-architecture
       results.  Three possible outcomes, each strengthens the report:
       (a) Pareto ranking stable across architectures (the
       cleanest result, claims generalize as written);

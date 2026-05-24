@@ -1,0 +1,30 @@
+# Keep the Docker build context small.  Anything reproducible from a
+# bare clone of the project shouldn't be sent to the daemon every build.
+
+# Git internals
+.git
+.gitignore
+.gitattributes
+
+# Local IDE / agent state
+.claude/
+.vscode/
+.idea/
+
+# Python / Poetry build artefacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Heavy bench outputs and plots — generated inside the container or
+# mounted via -v at run time; no reason to ship them in.
+results/
+presentation.pptx
+
+# Local environment files
+.env
+*.local

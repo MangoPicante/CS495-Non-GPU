@@ -38,6 +38,10 @@ results/smoke_accuracy.json
 # Transient benchmark log
 results/_bench.log
 
+# Docker build / smoke-test scratch logs (Phase 6 iteration)
+docker-build-*.log
+docker-smoke-*.log
+
 # IDE
 .vscode/
 .idea/
