@@ -292,6 +292,7 @@ bitnet-verify:
 		-n 32 \
 		-t $(THREADS)
 
+BITNET_BENCH_OUT     ?= results/bitnet_step_metrics.csv
 QWEN_Q8_BENCH_OUT    ?= results/qwen_q8_step_metrics.csv
 QWEN_Q4_BENCH_OUT ?= results/qwen_q4_step_metrics.csv
 
@@ -299,6 +300,7 @@ benchmark-bitnet:
 	$(POETRY) run python scripts/metrics_tracker.py \
 		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
+		--out $(BITNET_BENCH_OUT) \
 		--threads $(THREADS)
 
 benchmark-qwen-q8:

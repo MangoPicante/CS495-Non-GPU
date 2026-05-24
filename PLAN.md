@@ -566,13 +566,25 @@ Tasks:
       (ii) `scripts/smoke_test.py` hardcoded the Windows
           `build/bin/Release/llama-cli.exe` path and needed the same
           `build/bin/<name>` fallback `metrics_tracker.py` already had.
-      Headline finding to fold into REPORT.md §6.1 once the full
-      benchmark runs: **on the same i5-9400F**, BitNet's smoke
-      throughput jumps from ~21 tok/s (Windows native) to ~92 tok/s
-      (Linux x86 via Docker/WSL2) — a ~4.4× speedup attributable
-      purely to OS/toolchain.  Numbers are from 16-token raw `llama-cli`
-      samples and need confirmation from `make benchmark` at the
-      canonical three configs before going in the report.
+- [x] Full `make benchmark` in the x86 container on the same
+      i5-9400F to confirm/refute the initial smoke-test "~4.4×
+      Linux speedup" claim with clean steady-state numbers
+      (`results/linux_docker_x86/{bitnet,qwen_q8,qwen_q4}_step_metrics.csv`,
+      canonical (512,128)/(512,512)/(1,512) configs via llama-bench).
+      Result: **Linux Docker ≈ Windows-native on throughput**.  At
+      the (512,128) reference config: BitNet 21.31 vs 21.21 tok/s
+      (+0.5%), Qwen Q8 16.51 vs 15.10 (+9.3%), Qwen Q4 25.76 vs
+      24.89 (+3.5%).  RSS: BitNet identical, Qwen ~7-13% higher
+      on Linux (likely glibc malloc vs Windows heap allocator).
+      The smoke-test "92 tok/s" number was BitNet's `eval time`
+      line parsed at `-n 16`, which is far below the convergence
+      threshold and not comparable to llama-bench's warmed steady
+      state.  Implication for REPORT.md §6.1: containerization
+      does not measurably affect throughput, so cross-arch numbers
+      from Docker on c5/c6a/c7g are directly comparable to the
+      committed Windows-native baseline.  Energy comparison is
+      inconclusive (CodeCarbon uses Intel RAPL on Linux vs a
+      different power model on Windows — not apples-to-apples).
 - [ ] Smoke-test on `c5.xlarge` itself (on-demand, ~5 minutes, ~$0.02)
       as a final sanity check before the spot sweep.  Same
       command, same expected outcome — local Docker covered the
