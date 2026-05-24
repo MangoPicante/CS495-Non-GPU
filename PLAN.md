@@ -543,15 +543,20 @@ Tasks:
       reproducibility; mounting them as a volume is a documented
       alternative.  `make benchmark` works unmodified inside the
       container because `metrics_tracker.py` already falls back to
-      `build/bin/llama-bench` on non-Windows hosts.  Only the two
-      `llama-chrono*.patch` files apply on Linux clang; the
-      `bitnet-clangcl-const.patch` is skipped (ClangCL-specific) — no
-      new Linux-equivalent patches needed at the pinned commit, but the
-      Dockerfile header documents the decision so a future clang
-      regression can be patched without re-investigating.
+      `build/bin/llama-bench` on non-Windows hosts.  All three patches
+      in `patches/` apply on Linux clang-18 (initial assumption that
+      `bitnet-clangcl-const.patch` was ClangCL-only turned out to be
+      wrong — verified during the smoke phase below).
       Build / run:
       `docker buildx build --platform=linux/amd64 -t cs495-non-gpu:x86 .`
       `docker run --rm -v "$(pwd)/results:/capstone/results" cs495-non-gpu:x86 make benchmark`
+      Local arm64 build under qemu emulation was attempted and abandoned
+      — buildkit dropped its connection ~13 min in (42% through llama.cpp
+      compile, after BitNet TL1 codegen completed successfully).  Qemu
+      under sustained C++ compilation load on Windows + Docker Desktop
+      WSL2 is unreliable for builds of this size.  `make
+      aws-bootstrap-c7g` is the documented path: rsync the repo to the
+      c7g.xlarge instance and run `docker build` natively there.
 - [x] Smoke-test the containerized x86 build locally before
       committing to a paid instance.  Ran `docker buildx --platform=linux/amd64`
       + `make smoke-test` on the local i5-9400F via Docker Desktop's
