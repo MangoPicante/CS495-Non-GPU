@@ -595,10 +595,22 @@ Tasks:
       command, same expected outcome — local Docker covered the
       build-correctness risk; this run only confirms the AWS host
       is functioning.
-- [ ] Stage model weights in S3 to avoid re-downloading 4+ GiB of GGUFs
-      per instance.  `make bitnet-model` and `make qwen-q*-model` should
-      accept an `S3_BUCKET` env var that copies from S3 if set, falls back
-      to Hugging Face otherwise.
+- [~] **Obsolete — superseded by the Dockerfile baking GGUFs into the
+      image layer.**  Originally written to avoid re-downloading 4+ GiB of
+      GGUFs per AWS instance.  In the current containerized workflow:
+      `make aws-benchmark-{c5,c6a}` ships the prebuilt image (with GGUFs
+      embedded) via `docker save | ssh | docker load`; `aws-bootstrap-c7g`
+      builds natively on the instance and the `docker build` step pulls
+      the GGUFs once from HF directly inside the build.  Either way, no
+      per-instance HF re-download.  Implementing S3 staging would save
+      ~10-15 min total across the three-instance sweep and add marginal
+      robustness if HF rate-limits during the c7g build, at the cost of
+      ~2-3 hours of work (S3 push helper, fallback in `*-model` targets,
+      IAM/credentials setup, README docs).  Not worth the effort at our
+      scope — the actual problem the task was created to solve is
+      already addressed by image layering.  External readers are
+      unaffected: they'd download from HF either way since our bucket
+      would be private.
 - [ ] Run `make benchmark` on all three remote instances at the existing
       three `(n_prompt, n_gen)` configs.  Write per-instance bench CSVs
       to `results/aws_{c5,c6a,c7g}_xlarge/`.  Total compute budget
