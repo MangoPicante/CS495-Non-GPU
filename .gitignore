@@ -29,6 +29,11 @@ build/
 .env
 .env.*
 
+# AWS credentials downloaded from the IAM console — must not be committed
+*_credentials.csv
+*-credentials.csv
+*.pem
+
 # codecarbon output
 emissions.csv
 
