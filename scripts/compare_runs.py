@@ -56,12 +56,14 @@ DEFAULT_HARDWARE_RATE = 0.170
 # above still drives `cost_per_1k_tokens` in comparison_table.csv — but
 # kept here as the verified source-of-truth for the §6.1 discussion
 # table and for whenever per-arch cost-accuracy plots get added.
-# All us-east-1, Linux, on-demand.  Re-verify before publication.
-# Source: https://instances.vantage.sh/aws/ec2/<instance>   (2026-05-24)
+# All us-west-2, Linux, on-demand.  Re-verify before publication.
+# Source: https://instances.vantage.sh/aws/ec2/<instance>   (2026-05-25)
 AWS_ON_DEMAND_RATES = {
-    "c5.xlarge":  0.170,  # Intel Xeon Skylake-SP, AVX-512
-    "c6a.xlarge": 0.153,  # AMD EPYC 7R13 Zen 3, AVX2
-    "c7g.xlarge": 0.145,  # AWS Graviton3 ARM Neoverse-V1, Neon/SVE
+    "c5.xlarge":       0.170,   # Intel Xeon Skylake-SP, AVX-512 (original plan)
+    "c6a.xlarge":      0.153,   # AMD EPYC 7R13 Zen 3, AVX2 (original plan)
+    "c7g.xlarge":      0.145,   # AWS Graviton3 ARM, Neon/SVE (original plan)
+    "c7i-flex.large":  0.0848,  # Intel Sapphire Rapids, AVX-512 (Free Tier, 2 vCPUs)
+    "t4g.small":       0.0168,  # AWS Graviton2 ARM, Neon (Free Tier, 2 vCPUs)
 }
 
 # US residential average electricity rate (EIA, 2026 estimate, $/kWh).
@@ -133,17 +135,13 @@ CLOUD_API_COLOR = "#7F7F7F"
 # qwen_q4_step_metrics.csv) under results/<subdir>/.
 #
 # Architectures with no data on disk are skipped silently, so this list
-# can outpace the AWS sweep — the plot grows bars as CSVs land.  As of
-# 2026-05-24 only the two i5-9400F rows are populated; c5/c6a/c7g
-# placeholders activate once `make aws-benchmark-{c5,c6a,c7g}` writes
-# their CSVs.
+# can outpace the AWS sweep — the plot grows bars as CSVs land.
 CROSS_ARCH_SOURCES = [
-    # (label,                            subdir,             color)
-    ("Windows / i5-9400F (AVX2)",        None,               "#4C72B0"),
-    ("Linux Docker / i5-9400F (AVX2)",   "linux_docker_x86", "#7AAEDC"),
-    ("AWS c5.xlarge (Intel AVX-512)",    "aws_c5_xlarge",    "#1F77B4"),
-    ("AWS c6a.xlarge (AMD Zen3 AVX2)",   "aws_c6a_xlarge",   "#D62728"),
-    ("AWS c7g.xlarge (ARM Graviton3)",   "aws_c7g_xlarge",   "#2CA02C"),
+    # (label,                                     subdir,               color)
+    ("Windows / i5-9400F (AVX2)",                 None,                 "#4C72B0"),
+    ("Linux Docker / i5-9400F (AVX2)",            "linux_docker_x86",   "#7AAEDC"),
+    ("AWS c7i-flex.large (Intel AVX-512, 2v)",    "aws_c7i_flex_large", "#1F77B4"),
+    ("AWS t4g.small (ARM Graviton2, 2v)",         "aws_t4g_small",      "#2CA02C"),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -590,11 +590,15 @@ Tasks:
       committed Windows-native baseline.  Energy comparison is
       inconclusive (CodeCarbon uses Intel RAPL on Linux vs a
       different power model on Windows — not apples-to-apples).
-- [ ] Smoke-test on `c5.xlarge` itself (on-demand, ~5 minutes, ~$0.02)
-      as a final sanity check before the spot sweep.  Same
-      command, same expected outcome — local Docker covered the
-      build-correctness risk; this run only confirms the AWS host
-      is functioning.
+- [~] **Superseded by the Free Tier sweep below.**  The planned
+      c5.xlarge/c6a.xlarge/c7g.xlarge instances were unavailable due to
+      an IAM Free Tier restriction on the class AWS account.  A
+      c7i-flex.large (Intel Sapphire Rapids AVX-512, 2 vCPUs, Free Tier)
+      was used instead — same Dockerfile, same build, `THREADS=2
+      UBATCH=64`.  Results in `results/aws_c7i_flex_large/`.  An ARM
+      t4g.small was also attempted but failed (2 GB RAM insufficient for
+      the Docker build even with 4 GB swap).  See REPORT.md §6.1 for
+      findings.
 - [~] **Obsolete — superseded by the Dockerfile baking GGUFs into the
       image layer.**  Originally written to avoid re-downloading 4+ GiB of
       GGUFs per AWS instance.  In the current containerized workflow:
@@ -611,10 +615,11 @@ Tasks:
       already addressed by image layering.  External readers are
       unaffected: they'd download from HF either way since our bucket
       would be private.
-- [ ] Run `make benchmark` on all three remote instances at the existing
-      three `(n_prompt, n_gen)` configs.  Write per-instance bench CSVs
-      to `results/aws_{c5,c6a,c7g}_xlarge/`.  Total compute budget
-      ~$0.60 at spot pricing (3 instances x ~1 hour x ~$0.06/hr).
+- [x] Run `make benchmark` on c7i-flex.large (Free Tier x86 AVX-512,
+      2 vCPUs).  Results in `results/aws_c7i_flex_large/`.  BitNet/Q8
+      ratio 1.33× (vs 1.40× on i5-9400F); Q4 and BitNet nearly tied
+      at ~10 tok/s.  ARM t4g.small build failed (OOM during Docker
+      build with 2 GB RAM + 4 GB swap).  Total compute cost ~$0.15.
 - [x] Extend `scripts/compare_runs.py` with a per-architecture view —
       new `plot_cross_arch_throughput()` reads
       `results/{,linux_docker_x86,aws_c5_xlarge,aws_c6a_xlarge,aws_c7g_xlarge}/{bitnet,qwen_q8,qwen_q4}_step_metrics.csv`
@@ -653,20 +658,18 @@ Tasks:
         bullet was stale; the cost-ordering invariant the bullet
         proves is unaffected (any per-row rescaling preserves the
         ordering by construction).
-- [ ] Update REPORT.md §6.1 with measured cross-architecture
-      results.  Three possible outcomes, each strengthens the report:
-      (a) Pareto ranking stable across architectures (the
-      cleanest result, claims generalize as written);
-      (b) Pareto ranking shifts in a documented way (e.g. AVX-512
-      narrows the BitNet-vs-Q4 gap, ARM widens it), which
-      becomes a substantive new finding for the report's discussion
-      section;
-      (c) BitNet's Linux build is too fragile to run on ARM, which
-      itself is a portability finding worth documenting.
-- [ ] Add a `make aws-benchmark` Makefile target that runs the full
-      remote sweep via SSH against pre-staged spot instances, for
-      reproducibility.  Document the AWS account setup steps in
-      @README.md.
+- [x] Update REPORT.md §6.1 with measured cross-architecture
+      results.  Outcome (b): Pareto ranking preserved (BitNet > Q8)
+      but magnitudes are architecture-sensitive — AVX-512 narrows the
+      BitNet-vs-Q8 gap from 1.40× to 1.33× and compresses Q4's
+      advantage over Q8 from 1.65× to 1.31×.  Q4 and BitNet nearly
+      tied on AVX-512 at 2 threads (~10 tok/s each).  ARM t4g.small
+      build failed (OOM), documented as a portability finding (outcome c).
+- [x] Add `make aws-benchmark-c7i` / `aws-benchmark-t4g` /
+      `aws-benchmark-free-tier` Makefile targets for Free Tier
+      instances (`run_remote_benchmark_2v` with THREADS=2 UBATCH=64).
+      Original xlarge targets (`aws-benchmark-c5/c6a/c7g`) retained
+      for future use if account restrictions are lifted.
 
 Out of scope for Phase 6: re-running accuracy evals on remote instances
 (unchanged at deterministic decoding), GPU baselines (project is

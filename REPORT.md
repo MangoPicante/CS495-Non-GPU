@@ -677,11 +677,51 @@ memory becomes a multi-GB issue, but that regime is beyond what our
 
 ## 6. Threats to Validity
 
-1. **Single CPU.** All measurements on Intel i5-9400F (no AVX-512). The
-   throughput ratio likely shifts on AVX-512 hardware: BitNet TL2 uses
-   AVX-512 paths when available, Q8_0 also has AVX-512 paths, and which
-   benefits more is hardware-dependent. Phase 5 (`PLAN.md`) lists a
-   thread-count sweep and a hardware-rate sensitivity check.
+1. **Single CPU (partially mitigated).** The primary benchmarks were
+   measured on an Intel i5-9400F (Coffee Lake, AVX2, 6 cores / 4 threads
+   used).  To test cross-architecture generality, we re-ran the full
+   `make benchmark` suite on an AWS c7i-flex.large instance (Intel
+   Sapphire Rapids, AVX-512, 2 vCPUs, $0.0848/hr on-demand).  The
+   containerized build (same Dockerfile, same pinned commits) ran with
+   `THREADS=2 UBATCH=64` (BitNet's TL2 kernel stack-overflows at the
+   default ubatch=128 when limited to 2 threads).
+
+   Results at the reference (512, 128) config:
+
+   | Model | i5-9400F (4t, AVX2) | c7i-flex (2t, AVX-512) | Ratio |
+   |---|---:|---:|---:|
+   | BitNet b1.58 2B4T | 21.2 tok/s | 10.0 tok/s | 0.47× |
+   | Qwen Q8_0 | 15.1 tok/s | 7.5 tok/s | 0.50× |
+   | Qwen Q4_K_M | 24.9 tok/s | 9.8 tok/s | 0.39× |
+   | **BitNet / Q8 ratio** | **1.40×** | **1.33×** | |
+   | **Q4 / Q8 ratio** | **1.65×** | **1.31×** | |
+
+   The BitNet-over-Q8 advantage narrows slightly from 1.40× to 1.33× on
+   AVX-512, consistent with AVX-512 paths benefiting Q8's wider
+   multiply-accumulate more than BitNet's lookup-table kernel.  More
+   strikingly, Q4's advantage over Q8 compresses from 1.65× to 1.31× —
+   Q4 and BitNet are nearly tied on the c7i-flex (9.8 vs 10.0 tok/s),
+   whereas Q4 was the clear throughput leader on the i5-9400F.  The
+   Pareto *ranking* is preserved (BitNet > Q8, Q4 ≈ BitNet) but the
+   *magnitude* of the gaps is architecture-sensitive.
+
+   The cross-architecture throughput comparison is plotted in
+   `results/plots/cross_arch_throughput.png`.
+
+   **ARM attempt:** an AWS t4g.small (Graviton2 ARM, 2 vCPUs, 2 GB RAM)
+   was launched in parallel but could not complete the Docker build —
+   the C++ compilation of BitNet + llama.cpp overwhelmed the 2 GB RAM
+   even with 4 GB swap, causing the instance to become unresponsive.
+   ARM cross-architecture data would require a larger instance (e.g.
+   t4g.medium with 4 GB RAM), which was not available under the Free
+   Tier restriction.
+
+   **Constraints vs the original plan:** the AWS account was limited to
+   Free Tier instance types, so the planned c5.xlarge (4 vCPU Intel
+   AVX-512), c6a.xlarge (4 vCPU AMD Zen 3), and c7g.xlarge (4 vCPU ARM
+   Graviton3) were unavailable.  The Free Tier sweep loses the AMD and
+   ARM comparisons and drops from 4 to 2 vCPUs, but still tests the
+   highest-priority axis: whether AVX-512 shifts the model ranking.
 
 2. **Bias-trick API asymmetry.** Continuation scoring uses two different
    APIs (`logit_bias` on upstream Qwen, top-K probs on the BitNet fork).

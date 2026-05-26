@@ -69,6 +69,7 @@ OPUS_47_CARD_URL      := https://www.anthropic.com/claude-opus-4-7-system-card
         eval-accuracy-bitnet eval-accuracy-qwen-q8 eval-accuracy-qwen-q4 eval-accuracy \
         docker-build-x86 docker-build-arm \
         aws-bootstrap-c7g aws-benchmark-c5 aws-benchmark-c6a aws-benchmark-c7g aws-benchmark \
+        aws-bootstrap-t4g aws-benchmark-c7i aws-benchmark-t4g aws-benchmark-free-tier \
         clean nuke
 
 help:
@@ -153,6 +154,10 @@ help:
 	@echo "  aws-benchmark-c6a             Same as c5 but against c6a.xlarge (AMD Zen 3)"
 	@echo "  aws-benchmark-c7g             Run make benchmark on c7g.xlarge using the natively built arm image"
 	@echo "  aws-benchmark                 All three architectures sequentially"
+	@echo "  aws-benchmark-c7i             Benchmark on c7i-flex.large (Intel AVX-512, Free Tier)"
+	@echo "  aws-bootstrap-t4g             Rsync repo to t4g.small and build ARM image natively"
+	@echo "  aws-benchmark-t4g             Benchmark on t4g.small (ARM Graviton2, Free Tier)"
+	@echo "  aws-benchmark-free-tier       c7i + t4g sequentially"
 	@echo ""
 	@echo "Housekeeping:"
 	@echo "  clean               Remove results/plots/ and cached .pyc files"
@@ -311,27 +316,31 @@ bitnet-verify:
 BITNET_BENCH_OUT     ?= results/bitnet_step_metrics.csv
 QWEN_Q8_BENCH_OUT    ?= results/qwen_q8_step_metrics.csv
 QWEN_Q4_BENCH_OUT ?= results/qwen_q4_step_metrics.csv
+UBATCH               ?= 128
 
 benchmark-bitnet:
 	$(POETRY) run python scripts/metrics_tracker.py \
 		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
 		--out $(BITNET_BENCH_OUT) \
-		--threads $(THREADS)
+		--threads $(THREADS) \
+		--ubatch $(UBATCH)
 
 benchmark-qwen-q8:
 	$(POETRY) run python scripts/metrics_tracker.py \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q8_MODEL) \
 		--out $(QWEN_Q8_BENCH_OUT) \
-		--threads $(THREADS)
+		--threads $(THREADS) \
+		--ubatch $(UBATCH)
 
 benchmark-qwen-q4:
 	$(POETRY) run python scripts/metrics_tracker.py \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q4_MODEL) \
 		--out $(QWEN_Q4_BENCH_OUT) \
-		--threads $(THREADS)
+		--threads $(THREADS) \
+		--ubatch $(UBATCH)
 
 benchmark: benchmark-bitnet benchmark-qwen-q8 benchmark-qwen-q4
 
@@ -717,6 +726,8 @@ AWS_REMOTE_DIR       ?= /tmp/cs495
 C5_HOST              ?=
 C6A_HOST             ?=
 C7G_HOST             ?=
+C7I_HOST             ?=
+T4G_HOST             ?=
 
 # Local image build helpers — wrap the buildx commands in the docker
 # image header.  These are what `aws-benchmark-c5` / `-c6a` depend on
@@ -795,6 +806,49 @@ aws-benchmark-c7g: aws-bootstrap-c7g
 # leave usable data behind and re-running picks up cleanly.
 aws-benchmark: aws-benchmark-c5 aws-benchmark-c6a aws-benchmark-c7g
 	@echo "==> All three architectures complete; rerun \`make plots\` to refresh figures"
+
+# ── Free-Tier variant (Phase 6, 2-vCPU instances) ─────────────────────────
+# Same pattern as the xlarge targets but with THREADS=2 and UBATCH=64
+# (BitNet TL2 requires --ubatch ≤ 64 at 2 threads).  Images are built
+# natively on each instance rather than shipped, avoiding the slow home
+# upload.  $1 = image, $2 = host, $3 = local subdir.
+define run_remote_benchmark_2v
+	@echo "==> Running benchmark on $2 (THREADS=2, UBATCH=64)"
+	$(AWS_SSH) $(AWS_USER)@$2 '\
+	    rm -rf $(AWS_REMOTE_DIR)/out && mkdir -p $(AWS_REMOTE_DIR)/out && \
+	    docker run --rm \
+	        -e BITNET_DIR=/Models/BitNet \
+	        -e QWEN_DIR=/Models/Qwen \
+	        -e BITNET_BENCH_OUT=results/out/bitnet_step_metrics.csv \
+	        -e QWEN_Q8_BENCH_OUT=results/out/qwen_q8_step_metrics.csv \
+	        -e QWEN_Q4_BENCH_OUT=results/out/qwen_q4_step_metrics.csv \
+	        -v $(AWS_REMOTE_DIR)/out:/capstone/results/out \
+	        $1 make benchmark THREADS=2 UBATCH=64'
+	@mkdir -p results/$3
+	$(AWS_SCP) $(AWS_USER)@$2:'$(AWS_REMOTE_DIR)/out/*.csv' results/$3/
+	@echo "==> $2: results landed in results/$3/"
+endef
+
+aws-benchmark-c7i:
+	@test -n "$(C7I_HOST)" || (echo "ERROR: C7I_HOST must be set" && exit 1)
+	$(call run_remote_benchmark_2v,$(AWS_IMAGE_X86),$(C7I_HOST),aws_c7i_flex_large)
+
+aws-bootstrap-t4g:
+	@test -n "$(T4G_HOST)" || (echo "ERROR: T4G_HOST must be set" && exit 1)
+	@echo "==> Syncing repo to $(T4G_HOST):$(AWS_REMOTE_DIR)/repo"
+	$(AWS_SSH) $(AWS_USER)@$(T4G_HOST) 'mkdir -p $(AWS_REMOTE_DIR)/repo'
+	tar czf - --exclude='.git' --exclude='.venv' --exclude='results' \
+	    --exclude='docker-*.log' --exclude='__pycache__' \
+	    -C . . | $(AWS_SSH) $(AWS_USER)@$(T4G_HOST) 'cd $(AWS_REMOTE_DIR)/repo && tar xzf -'
+	@echo "==> Building $(AWS_IMAGE_ARM) on $(T4G_HOST) (~slow; native arm64 build with swap)"
+	$(AWS_SSH) $(AWS_USER)@$(T4G_HOST) \
+	    'cd $(AWS_REMOTE_DIR)/repo && docker build -t $(AWS_IMAGE_ARM) .'
+
+aws-benchmark-t4g: aws-bootstrap-t4g
+	$(call run_remote_benchmark_2v,$(AWS_IMAGE_ARM),$(T4G_HOST),aws_t4g_small)
+
+aws-benchmark-free-tier: aws-benchmark-c7i aws-benchmark-t4g
+	@echo "==> Free-tier sweep complete; rerun \`make plots\` to refresh figures"
 
 # ── Housekeeping ───────────────────────────────────────────────────────────────
 
