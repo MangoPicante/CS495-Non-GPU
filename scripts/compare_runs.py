@@ -199,7 +199,7 @@ CLOUD_API_PRICING = {
 # scores under the same product name.  Bump CLOUD_API_ACCURACY_DATE on
 # refresh.
 # ─────────────────────────────────────────────────────────────────────────────
-CLOUD_API_ACCURACY_DATE = "2026-05-20"
+CLOUD_API_ACCURACY_DATE = "2026-05-27"
 CLOUD_API_ACCURACY: dict[str, dict[str, float | None]] = {
     "OpenAI GPT-4o mini": {
         # OpenAI GPT-4o mini announcement, July 2024.  No standalone card.
@@ -215,19 +215,23 @@ CLOUD_API_ACCURACY: dict[str, dict[str, float | None]] = {
         "mmlu": 78.0,
     },
     "OpenAI GPT-4o": {
-        # OpenAI tech report / launch announcement, May 2024.  System card's
-        # MMLU is a medical-only subset (see footnote 6 of GPT-4o card) and
-        # is not directly comparable.
-        "arc_easy": None, "arc_challenge": 96.4,
-        "winogrande": 87.0, "hellaswag": 95.3,
+        # OpenAI launch announcement, May 2024.  System card's MMLU is a
+        # medical-only subset (footnote 6) and not directly comparable.
+        # ARC/WinoGrande/HellaSwag were previously listed here but traced
+        # back to the GPT-4 tech report (March 2023), not GPT-4o — the
+        # GPT-4o system card does not publish these benchmarks.
+        "arc_easy": None, "arc_challenge": None,
+        "winogrande": None, "hellaswag": None,
         "mmlu": 88.7,
     },
     "Anthropic Claude Sonnet 4.5": {
-        # Anthropic announcement / third-party leaderboards — system card
-        # is safety-focused and reports no general benchmarks.
+        # Anthropic launch announcement + third-party leaderboards (Artificial
+        # Analysis, Skywork AI) — system card is safety-focused and reports no
+        # general benchmarks.  89.2% is the standard-MMLU figure; not to be
+        # confused with MMLU-Pro (86%).
         "arc_easy": None, "arc_challenge": None,
         "winogrande": None, "hellaswag": None,
-        "mmlu": 88.0,
+        "mmlu": 89.2,
     },
     "Anthropic Claude Opus 4.7": {
         # Anthropic Opus 4.7 launch announcement, April 2026.  The system
