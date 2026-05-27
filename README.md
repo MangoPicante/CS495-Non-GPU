@@ -31,7 +31,7 @@ MMLU edge over Q4 (+1pt) is binding.
 
 All three self-hosted models beat every commercial cloud API tier on $/1k
 tokens at this size class — 4.6× cheaper than the cheapest API tier
-(GPT-4o mini) on local electricity, 573× cheaper than Claude Opus 4.7 —
+(GPT-4o mini) on local electricity, 191× cheaper than Claude Opus 4.7 —
 with the strong caveat that the comparison only holds for workloads where
 a 2B-parameter model's capability is sufficient.
 

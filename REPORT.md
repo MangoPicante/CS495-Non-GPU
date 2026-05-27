@@ -84,7 +84,7 @@ out the points needed to interpret the dashboard below.
     energy for FP16 baselines. Answers: *"what's the marginal electricity
     cost on hardware I already own?"*
 - **Cloud API pricing** — `CLOUD_API_PRICING` in `compare_runs.py`,
-  hardcoded as of 2026-05-15 from each provider's public pricing page.
+  hardcoded as of 2026-05-24 from each provider's public pricing page.
   Used only by §3.9 (`cloud_cost_comparison.png`); §3.5 and §5.3 still
   use the AWS proxy and local-electricity framings.
 - **Paper FP16 baselines** are pasted directly from arXiv:2504.12285
@@ -263,7 +263,7 @@ questions — see §2 Methodology and §3.9 for the framing comparison.
 
 ![Self-hosted vs cloud API cost per 1k output tokens](results/plots/cloud_cost_comparison.png)
 
-Cloud API output-token pricing as of **2026-05-15** (hardcoded in
+Cloud API output-token pricing as of **2026-05-24** (hardcoded in
 `compare_runs.py:CLOUD_API_PRICING` — re-verify before publication, these
 change):
 
@@ -273,7 +273,7 @@ change):
 | Anthropic Claude Haiku 4.5 | $0.005000 |
 | OpenAI GPT-4o | $0.010000 |
 | Anthropic Claude Sonnet 4.5 | $0.015000 |
-| Anthropic Claude Opus 4.7 | $0.075000 |
+| Anthropic Claude Opus 4.7 | $0.025000 |
 
 Combined ranking, ascending cost:
 
@@ -289,14 +289,14 @@ Combined ranking, ascending cost:
 | 8 | Anthropic Claude Haiku 4.5 (API) | $0.005000 | 38× |
 | 9 | OpenAI GPT-4o (API) | $0.010000 | 76× |
 | 10 | Anthropic Claude Sonnet 4.5 (API) | $0.015000 | 115× |
-| 11 | Anthropic Claude Opus 4.7 (API) | $0.075000 | **573×** |
+| 11 | Anthropic Claude Opus 4.7 (API) | $0.025000 | **191×** |
 
 **Two ways to read this**:
 
 - *Hardware you already own* → local-electricity is the relevant framing.
   BitNet and Q4_K_M are within 1% of each other ($0.000131 vs $0.000132)
   and both are 4.6× cheaper than the cheapest cloud API tier (GPT-4o
-  mini) and 573× cheaper than Claude Opus 4.7.
+  mini) and 191× cheaper than Claude Opus 4.7.
 - *Cloud-rented infrastructure* → AWS proxy is the relevant framing.
   Q4_K_M is cheapest of the self-hosted options here ($0.001897) because
   it generates more tokens per rented hour.  BitNet sits ~15% higher.
@@ -514,7 +514,7 @@ At 1 billion generated tokens/day:
 | Anthropic Claude Haiku 4.5 (API) | $5,000 | $1.83M |
 | OpenAI GPT-4o (API) | $10,000 | $3.65M |
 | Anthropic Claude Sonnet 4.5 (API) | $15,000 | $5.48M |
-| Anthropic Claude Opus 4.7 (API) | $75,000 | **$27.4M** |
+| Anthropic Claude Opus 4.7 (API) | $25,000 | **$9.13M** |
 
 The cost gradient is dramatic at production scale.  The numbers assume
 sustained 100% utilization (1B tokens/day ≈ 11.6k tok/s, far above what
@@ -772,7 +772,7 @@ memory becomes a multi-GB issue, but that regime is beyond what our
 
 6. **Cloud API pricing freshness.** The cost-vs-cloud comparison in §3.9
    and §5.3 uses API output-token prices hardcoded in
-   `compare_runs.py:CLOUD_API_PRICING` (dated 2026-05-15). Cloud
+   `compare_runs.py:CLOUD_API_PRICING` (dated 2026-05-24). Cloud
    providers change pricing periodically; verify against each provider's
    pricing page (openai.com/api/pricing, anthropic.com/pricing#api)
    before relying on §3.9 / §5.3 numbers for external publication. A
@@ -864,7 +864,7 @@ local-electricity cost (§3.8) — 17× cheaper than the cloud-rental
 framing — and (b) the full ranking against five commercial LLM API
 tiers (§3.9). Self-hosted BitNet and Q4_K_M tie at ~$0.000131/1k tokens
 local-electricity, 4.6× cheaper than the cheapest API tier (GPT-4o
-mini) and 573× cheaper than Claude Opus 4.7, with the strong caveat
+mini) and 191× cheaper than Claude Opus 4.7, with the strong caveat
 that this comparison only holds when a 2B-parameter model's capability
 is sufficient for the task.
 
