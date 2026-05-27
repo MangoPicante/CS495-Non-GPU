@@ -313,6 +313,14 @@ def load_accuracy(json_path: Path) -> dict:
     }
 
 
+def load_accuracy_full(json_path: Path) -> dict | None:
+    """Return the entire accuracy JSON (subjects, elapsed_s, energy, etc.)."""
+    if not json_path.exists():
+        return None
+    with json_path.open() as f:
+        return json.load(f)
+
+
 def load_qwen(csv_path: Path) -> pd.DataFrame | None:
     if not csv_path.exists():
         return None
@@ -1420,14 +1428,188 @@ def plot_cloud_cost_accuracy(comparison_df: pd.DataFrame, out_dir: Path):
     print(f"Saved {path}")
 
 
+def plot_mmlu_subject_heatmap(
+    bitnet_full: dict | None,
+    qwen_q8_full: dict | None,
+    qwen_q4_full: dict | None,
+    out_dir: Path,
+):
+    """
+    Heatmap of MMLU per-subject accuracy for the three locally-measured models.
+
+    Rows are 57 MMLU subjects sorted by BitNet accuracy (worst at top so
+    weak spots are immediately visible).  Columns are the three models.
+    Cells are annotated with accuracy values and colored on a sequential
+    blue scale (higher = darker).
+    """
+    from matplotlib.colors import Normalize
+
+    models: list[tuple[str, dict]] = []
+    for label, full in [
+        ("Qwen Q8_0",   qwen_q8_full),
+        ("Qwen Q4_K_M", qwen_q4_full),
+        ("BitNet 2B4T",  bitnet_full),
+    ]:
+        if full is not None and "mmlu" in full and "subjects" in full["mmlu"]:
+            models.append((label, full["mmlu"]["subjects"]))
+
+    if len(models) < 2:
+        print("Skipping MMLU subject heatmap: need at least 2 models with per-subject data.")
+        return
+
+    all_subjects: set[str] = set()
+    for _, subj_dict in models:
+        all_subjects.update(subj_dict.keys())
+
+    ref_label, ref_subjects = models[-1]
+    subjects_sorted = sorted(all_subjects,
+                             key=lambda s: ref_subjects.get(s, {}).get("accuracy", 0))
+
+    n_subj = len(subjects_sorted)
+    n_models = len(models)
+    matrix = np.full((n_subj, n_models), np.nan)
+    for j, (_, subj_dict) in enumerate(models):
+        for i, subj in enumerate(subjects_sorted):
+            acc = subj_dict.get(subj, {}).get("accuracy")
+            if acc is not None:
+                matrix[i, j] = acc
+
+    display_names = [s.replace("_", " ").title() for s in subjects_sorted]
+
+    fig, ax = plt.subplots(figsize=(max(6, n_models * 2.2), max(14, n_subj * 0.32)))
+    norm = Normalize(vmin=25, vmax=80)
+    im = ax.imshow(matrix, aspect="auto", cmap="YlGnBu", norm=norm)
+
+    ax.set_xticks(range(n_models))
+    ax.set_xticklabels([m[0] for m in models], fontsize=10)
+    ax.set_yticks(range(n_subj))
+    ax.set_yticklabels(display_names, fontsize=7)
+    ax.xaxis.set_ticks_position("top")
+    ax.xaxis.set_label_position("top")
+
+    for i in range(n_subj):
+        for j in range(n_models):
+            val = matrix[i, j]
+            if np.isnan(val):
+                continue
+            text_color = "white" if val > 62 else "black"
+            ax.text(j, i, f"{val:.0f}", ha="center", va="center",
+                    fontsize=6.5, color=text_color)
+
+    cbar = fig.colorbar(im, ax=ax, shrink=0.5, pad=0.02)
+    cbar.set_label("Accuracy (%)")
+
+    ax.set_title(
+        "MMLU Per-Subject Accuracy: BitNet b1.58 2B4T vs Qwen2.5 1.5B\n"
+        "(57 subjects, sorted by BitNet accuracy ascending — 5-shot)",
+        pad=20,
+    )
+    fig.tight_layout()
+    path = out_dir / "mmlu_subject_heatmap.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
+def plot_accuracy_eval_cost(
+    bitnet_full: dict | None,
+    qwen_q8_full: dict | None,
+    qwen_q4_full: dict | None,
+    out_dir: Path,
+):
+    """
+    Total wall-clock time and energy consumed by the accuracy evaluation
+    suite, broken down by benchmark task and model.
+
+    Two side-by-side panels:
+      (a) Wall-clock hours per task per model (stacked bar)
+      (b) Energy kWh per task per model (stacked bar)
+
+    Useful for the reproducibility discussion: shows how expensive it is
+    to replicate the full evaluation.  Skips silently if no accuracy JSON
+    contains elapsed_s.
+    """
+    tasks = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
+    task_display = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
+    task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
+
+    series: list[tuple[str, str, dict]] = []
+    for label, color, full in [
+        ("Qwen Q8_0",   QWEN_Q8_COLOR, qwen_q8_full),
+        ("Qwen Q4_K_M", QWEN_Q4_COLOR, qwen_q4_full),
+        ("BitNet 2B4T",  BITNET_COLOR,   bitnet_full),
+    ]:
+        if full is None:
+            continue
+        has_time = any(full.get(t, {}).get("elapsed_s") is not None for t in tasks)
+        if has_time:
+            series.append((label, color, full))
+
+    if not series:
+        print("Skipping accuracy eval cost plot: no elapsed_s data in accuracy JSONs.")
+        return
+
+    fig, (ax_t, ax_e) = plt.subplots(1, 2, figsize=(14, 5))
+    x = np.arange(len(series))
+    width = 0.6
+
+    bottom_t = np.zeros(len(series))
+    bottom_e = np.zeros(len(series))
+    for ti, (task, td, tc) in enumerate(zip(tasks, task_display, task_colors)):
+        hours = []
+        kwh = []
+        for _, _, full in series:
+            info = full.get(task, {})
+            h = info.get("elapsed_s")
+            hours.append(h / 3600.0 if h is not None else 0)
+            e = info.get("energy_kwh")
+            kwh.append(e if e is not None else 0)
+        ax_t.bar(x, hours, width, bottom=bottom_t, label=td, color=tc)
+        ax_e.bar(x, kwh,   width, bottom=bottom_e, label=td, color=tc)
+        bottom_t += hours
+        bottom_e += kwh
+
+    for ax, totals, fmt, ylabel, title_suffix in [
+        (ax_t, bottom_t, "{:.1f}h", "Wall-clock time (hours)", "Time"),
+        (ax_e, bottom_e, "{:.3f}", "Energy (kWh)", "Energy"),
+    ]:
+        ax.set_xticks(x)
+        ax.set_xticklabels([s[0] for s in series])
+        ax.set_ylabel(ylabel)
+        max_val = max(totals) if len(totals) else 1
+        ax.set_ylim(0, max_val * 1.15)
+        for xi, val in zip(x, totals):
+            ax.text(xi, val + max_val * 0.02, fmt.format(val),
+                    ha="center", fontsize=9, fontweight="bold")
+        panel_letter = "a" if ax is ax_t else "b"
+        ax.set_title(f"({panel_letter}) Evaluation {title_suffix}", loc="left")
+        ax.grid(axis="y", alpha=0.3)
+
+    ax_t.legend(loc="upper left", fontsize=8)
+
+    fig.suptitle(
+        "Total Accuracy Evaluation Cost\n"
+        "(full 5-benchmark suite: ARC-Easy, ARC-Challenge, WinoGrande, HellaSwag, MMLU)",
+        fontsize=12,
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.90])
+    path = out_dir / "accuracy_eval_cost.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
 def main():
     args = parse_args()
     local_df = load_local(Path(args.results))
     local_acc = load_accuracy(Path(args.accuracy))
+    local_acc_full = load_accuracy_full(Path(args.accuracy))
     qwen_q8_df = load_qwen(Path(args.qwen_q8_results))
     qwen_q8_acc = load_accuracy(Path(args.qwen_q8_accuracy))
+    qwen_q8_acc_full = load_accuracy_full(Path(args.qwen_q8_accuracy))
     qwen_q4_df = load_qwen(Path(args.qwen_q4_results))
     qwen_q4_acc = load_accuracy(Path(args.qwen_q4_accuracy))
+    qwen_q4_acc_full = load_accuracy_full(Path(args.qwen_q4_accuracy))
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     comparison_df = build_comparison_df(
@@ -1451,6 +1633,8 @@ def main():
     plot_memory_accuracy(comparison_df, PLOTS_DIR)
     plot_cloud_accuracy_comparison(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc)
     plot_cloud_cost_accuracy(comparison_df, PLOTS_DIR)
+    plot_mmlu_subject_heatmap(local_acc_full, qwen_q8_acc_full, qwen_q4_acc_full, PLOTS_DIR)
+    plot_accuracy_eval_cost(local_acc_full, qwen_q8_acc_full, qwen_q4_acc_full, PLOTS_DIR)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
 
