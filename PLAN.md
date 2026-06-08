@@ -670,6 +670,78 @@ Tasks:
       instances (`run_remote_benchmark_2v` with THREADS=2 UBATCH=64).
       Original xlarge targets (`aws-benchmark-c5/c6a/c7g`) retained
       for future use if account restrictions are lifted.
+- [x] Extend the model set to five: add Qwen2.5-1.5B Q2_K (deepest
+      Qwen quantization) and Llama-3.2-1B-Instruct Q4_K_M (second model
+      family, paired with the existing LLaMA 3.2 1B FP16 paper row).
+      `Dockerfile` pulls both new GGUFs from HF; `Makefile`'s
+      `run_remote_benchmark` and `run_remote_benchmark_2v` defines pass
+      `QWEN_Q2_BENCH_OUT` / `LLAMA_Q4_BENCH_OUT` env vars through to the
+      remote container.  `scripts/compare_runs.py` threads `qwen_q2_df` /
+      `qwen_q2_acc` / `llama_q4_df` / `llama_q4_acc` through every per-model
+      plot (`plot_throughput`, `plot_memory`, `plot_accuracy`,
+      `plot_energy_carbon`, `plot_cloud_cost_comparison`,
+      `plot_cloud_accuracy_comparison`, `plot_cloud_cost_accuracy`,
+      `plot_mmlu_subject_heatmap`, `plot_accuracy_eval_cost`); adds
+      `QWEN_Q2_COLOR` (red) and `LLAMA_Q4_COLOR` (brown) constants; extends
+      `_bar_series` / `_legend_handles` / `_accuracy_scatter` with the
+      quant-chain ordering (Qwen FP16 paper → Q8 → Q4 → Q2 ours; LLaMA FP16
+      paper → Llama Q4 ours) and dotted paper→ours connectors;
+      `_load_arch_throughput` and `plot_cross_arch_throughput` auto-discover
+      which of the five models have CSVs per architecture so missing bars
+      drop silently.
+- [x] Restructure two stacked plots into single twin-axis panels per
+      user request:
+      (i) `plot_energy_carbon` collapses from three panels (Wh / gCO₂ / USD)
+          to one — Wh on the bottom x-axis, gCO₂ on a top secondary x-axis
+          via the run's measured grid intensity (an exact relabeling since
+          carbon = energy × constant at one location).  USD/electricity
+          panel removed.
+      (ii) `plot_accuracy_eval_cost` collapses from two panels (hours /
+          kWh) to one stacked-horizontal-bar panel — hours on the bottom
+          x-axis, kWh on a top secondary x-axis via the data's average
+          kWh/hour ratio (≈ avg CPU power).  Slight approximation since
+          per-model power varies a few percent; the axis label documents
+          this ("approx. via avg power ≈ XX W").
+- [x] Re-run c7i-flex.large with the full 5-model set.  Re-measures
+      BitNet / Qwen Q8 / Qwen Q4 against the rebuilt container so all
+      five models on c7i are captured in the same run, and adds the new
+      Q2_K and Llama Q4 rows.  Diagnosed the silent stall observed on
+      the first attempt: long `RUN` layers (downloading GGUFs, installing
+      poetry) produce no stdout, the SSH connection idles, and NAT
+      times it out without ever resetting cleanly.  Fix: override
+      `AWS_SSH` with `-o ServerAliveInterval=60 -o ServerAliveCountMax=10`
+      at the make command line.  Results in `results/aws_c7i_flex_large/`
+      (5 CSVs).
+- [x] Second t4g.small attempt — confirmed unsalvageable for the
+      Docker build.  AWS reports the instance as status ok/ok, but the
+      parallel C++ build of llama.cpp's per-model object files thrashes
+      the 2 GB RAM + 4 GB EBS-backed swap; sshd is starved and the
+      session hangs without a kernel OOM-kill entry.  Build stalled at
+      step 19/30, 40% through llama.cpp model compilations.  ARM
+      portability finding stands as "not on this instance type" — see
+      memory note `project_t4g_small_oom.md` for future retries
+      (recommend c7g.large, ~$0.07/hr, 2 vCPU + 4 GB RAM).
+- [ ] Run benchmarks for Qwen Q2_K and Llama Q4 in the local Linux
+      Docker container (`results/linux_docker_x86/qwen_q2_step_metrics.csv`
+      and `llama_q4_step_metrics.csv` don't exist yet, so the cross-arch
+      plot's Linux Docker column is missing bars for those two models).
+- [ ] Run accuracy evaluations for Qwen Q2_K and Llama Q4 (no
+      `accuracy_results_qwen_q2.json` / `accuracy_results_llama_q4.json`
+      yet; `accuracy_eval_cost.png` and `cloud_cost_accuracy.png` still
+      show three models instead of five, and the `_accuracy_scatter`
+      scatters miss the Q4→Q2 and LLaMA paper→Q4 connectors that the new
+      code is wired to draw once data lands).
+- [ ] Refresh `REPORT.md` with: (a) the 5-model c7i numbers in §6.1
+      (BitNet, Q8, Q4 re-measured plus Q2 and Llama added); (b) Q2_K and
+      Llama Q4 rows in the headline tables and accuracy comparisons; (c)
+      the energy/carbon and accuracy-eval-cost plot layout changes
+      (single panel with secondary x-axis instead of multi-panel grids).
+- [ ] (Optional) Retry ARM data on c7g.large or pre-build the ARM
+      image on a beefier instance and `docker save | ssh t4g 'docker
+      load'` so the benchmark runs on t4g.small but the build doesn't.
+      `CROSS_ARCH_SOURCES` keeps the `aws_t4g_small` entry so dropping
+      CSVs into `results/aws_t4g_small/` later lights up the ARM bars
+      without any code change.
 
 Out of scope for Phase 6: re-running accuracy evals on remote instances
 (unchanged at deterministic decoding), GPU baselines (project is
