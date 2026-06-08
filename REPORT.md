@@ -813,6 +813,27 @@ memory becomes a multi-GB issue, but that regime is beyond what our
    result already isolates the stack variable; the Q4 quantization
    advantage is orthogonal.
 
+9. **PTQ accuracy sensitivity at small model scale.** The Q8_0 → Q4_K_M
+   accuracy drop observed here (mean −1.65pt, WinoGrande −12.2pt) is on the
+   larger end of what is typical in the published PTQ literature. For 7B+
+   models, community benchmarks on Llama-family GGUFs report perplexity
+   increases of roughly 0.1–0.3 points (WikiText-2) for Q4_K_M vs FP16, and
+   Q8_0 is near-lossless (~0.01pt increase). Recent systematic evaluations
+   of GGUF quantization on modern instruction-tuned models confirm W8A8 as
+   essentially lossless and W4A8 as requiring caution but recoverable with
+   calibration-based methods (Liu et al., 2025; arXiv:2601.09555). However,
+   smaller models are known to be more quantization-sensitive: the accuracy
+   gap between quantization levels is materially more pronounced at 1B–3B
+   scale than at 7B+ (llama.cpp community discussion #5962). The WinoGrande
+   cliff in particular (−12.2pt Q8→Q4 vs −3.2pt on ARC-Easy) suggests a
+   task-specific sensitivity — likely because WinoGrande's pronoun-resolution
+   format depends on fine-grained probability differences between two near-
+   synonym options, which degrades under aggressive quantization more than
+   knowledge recall or multiple-choice tasks do. The Q4_K_M accuracy numbers
+   in §3.7 should therefore be read as representative of the 1.5B size class
+   specifically; the same Q4_K_M format on a 7B model would likely show a
+   smaller accuracy penalty.
+
 ---
 
 ## 7. Conclusion

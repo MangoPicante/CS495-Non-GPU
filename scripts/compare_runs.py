@@ -45,6 +45,10 @@ DEFAULT_QWEN_Q8_CSV = Path(__file__).parent.parent / "results" / "qwen_q8_step_m
 DEFAULT_QWEN_Q8_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen_q8.json"
 DEFAULT_QWEN_Q4_CSV = Path(__file__).parent.parent / "results" / "qwen_q4_step_metrics.csv"
 DEFAULT_QWEN_Q4_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen_q4.json"
+DEFAULT_QWEN_Q2_CSV = Path(__file__).parent.parent / "results" / "qwen_q2_step_metrics.csv"
+DEFAULT_QWEN_Q2_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen_q2.json"
+DEFAULT_LLAMA_Q4_CSV = Path(__file__).parent.parent / "results" / "llama_q4_step_metrics.csv"
+DEFAULT_LLAMA_Q4_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_llama_q4.json"
 
 # AWS c5.xlarge on-demand, us-east-1 (4 vCPUs — matches 4-thread benchmark condition)
 # Source: https://instances.vantage.sh/aws/ec2/c5.xlarge (re-verified 2026-05-24:
@@ -71,30 +75,21 @@ AWS_ON_DEMAND_RATES = {
 # --electricity-rate for industrial (~$0.10) or your local utility's rate.
 DEFAULT_ELECTRICITY_RATE = 0.16
 
-# Published FP16 baseline numbers from arXiv:2504.12285 Table 1
-# Throughput condition: n_prompt=512, n_gen=128, single-thread x86 CPU
-# Qwen2.5 1.5B is broken out separately (QWEN_PAPER) because we run it locally
-# and want to plot the paper target alongside our measurement.
+# Published FP16 baseline numbers from arXiv:2504.12285 Table 1.
+# Throughput condition: n_prompt=512, n_gen=128, single-thread x86 CPU.
+# Only families for which we also evaluate a locally-measured PTQ variant
+# are retained — keeps every FP16 paper row paired to one of our "ours"
+# rows for a clean before/after comparison:
+#   LLaMA 3.2 1B  paper FP16  ↔  Llama-3.2-1B-Instruct Q4_K_M (ours)
+#   Qwen2.5 1.5B  paper FP16  ↔  Qwen2.5-1.5B-Instruct Q8_0/Q4_K_M/Q2_K (ours)
+# Qwen2.5 1.5B is broken out separately (QWEN_PAPER below).
+# Gemma-3 1B, SmolLM2 1.7B, MiniCPM 2B removed — no PTQ counterpart in this
+# study, so their rows were FP16-only and unactionable.
 OTHER_BASELINES = {
     "LLaMA 3.2 1B": {
         "throughput_tokens_s": 4.5,  "peak_rss_mb": 2600,
         "arc_easy": 69.87, "arc_challenge": 41.04,
         "winogrande": 60.77, "hellaswag": 61.05, "mmlu": 42.12,
-    },
-    "Gemma-3 1B": {
-        "throughput_tokens_s": 4.1,  "peak_rss_mb": 2700,
-        "arc_easy": 79.42, "arc_challenge": 46.25,
-        "winogrande": 66.38, "hellaswag": 72.15, "mmlu": 50.33,
-    },
-    "SmolLM2 1.7B": {
-        "throughput_tokens_s": 3.5,  "peak_rss_mb": 3300,
-        "arc_easy": 81.82, "arc_challenge": 52.99,
-        "winogrande": 68.67, "hellaswag": 72.29, "mmlu": 51.77,
-    },
-    "MiniCPM 2B": {
-        "throughput_tokens_s": 2.9,  "peak_rss_mb": 4100,
-        "arc_easy": 82.20, "arc_challenge": 51.96,
-        "winogrande": 68.27, "hellaswag": 75.08, "mmlu": 53.07,
     },
 }
 
@@ -262,6 +257,10 @@ def parse_args():
     p.add_argument("--qwen-q8-accuracy", default=str(DEFAULT_QWEN_Q8_ACCURACY_JSON))
     p.add_argument("--qwen-q4-results", default=str(DEFAULT_QWEN_Q4_CSV))
     p.add_argument("--qwen-q4-accuracy", default=str(DEFAULT_QWEN_Q4_ACCURACY_JSON))
+    p.add_argument("--qwen-q2-results", default=str(DEFAULT_QWEN_Q2_CSV))
+    p.add_argument("--qwen-q2-accuracy", default=str(DEFAULT_QWEN_Q2_ACCURACY_JSON))
+    p.add_argument("--llama-q4-results", default=str(DEFAULT_LLAMA_Q4_CSV))
+    p.add_argument("--llama-q4-accuracy", default=str(DEFAULT_LLAMA_Q4_ACCURACY_JSON))
     p.add_argument("--csv", default=str(DEFAULT_COMPARISON_CSV))
     p.add_argument(
         "--hardware-rate",
@@ -375,6 +374,10 @@ def build_comparison_df(
     qwen_q8_acc: dict | None = None,
     qwen_q4_df: pd.DataFrame | None = None,
     qwen_q4_acc: dict | None = None,
+    qwen_q2_df: pd.DataFrame | None = None,
+    qwen_q2_acc: dict | None = None,
+    llama_q4_df: pd.DataFrame | None = None,
+    llama_q4_acc: dict | None = None,
     electricity_rate: float = DEFAULT_ELECTRICITY_RATE,
 ) -> pd.DataFrame:
     ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
@@ -435,6 +438,36 @@ def build_comparison_df(
             "cost_per_1k_tokens": q4_cost,
             "energy_cost_per_1k_tokens": round(q4_e_cost, 6) if q4_e_cost is not None else "",
             **{f: (round(q4_acc[f], 2) if q4_acc.get(f) is not None else "") for f in ACC_FIELDS},
+        })
+
+    q2_acc = qwen_q2_acc or {}
+    if qwen_q2_df is not None or any(q2_acc.get(f) is not None for f in ACC_FIELDS):
+        q2_tps, q2_rss = _bench_row(qwen_q2_df) if qwen_q2_df is not None else (None, None)
+        q2_cost = round(cost_per_1k(q2_tps, hardware_rate), 6) if q2_tps else ""
+        q2_e_cost = energy_cost_per_1k(qwen_q2_df, electricity_rate)
+        rows.append({
+            "model": "Qwen2.5-1.5B-Instruct Q2_K",
+            "source": "ours",
+            "throughput_tokens_s": round(q2_tps, 2) if q2_tps is not None else "",
+            "peak_rss_mb": round(q2_rss, 0) if q2_rss is not None else "",
+            "cost_per_1k_tokens": q2_cost,
+            "energy_cost_per_1k_tokens": round(q2_e_cost, 6) if q2_e_cost is not None else "",
+            **{f: (round(q2_acc[f], 2) if q2_acc.get(f) is not None else "") for f in ACC_FIELDS},
+        })
+
+    llama_acc = llama_q4_acc or {}
+    if llama_q4_df is not None or any(llama_acc.get(f) is not None for f in ACC_FIELDS):
+        llama_tps, llama_rss = _bench_row(llama_q4_df) if llama_q4_df is not None else (None, None)
+        llama_cost = round(cost_per_1k(llama_tps, hardware_rate), 6) if llama_tps else ""
+        llama_e_cost = energy_cost_per_1k(llama_q4_df, electricity_rate)
+        rows.append({
+            "model": "Llama-3.2-1B-Instruct Q4_K_M",
+            "source": "ours",
+            "throughput_tokens_s": round(llama_tps, 2) if llama_tps is not None else "",
+            "peak_rss_mb": round(llama_rss, 0) if llama_rss is not None else "",
+            "cost_per_1k_tokens": llama_cost,
+            "energy_cost_per_1k_tokens": round(llama_e_cost, 6) if llama_e_cost is not None else "",
+            **{f: (round(llama_acc[f], 2) if llama_acc.get(f) is not None else "") for f in ACC_FIELDS},
         })
 
     bitnet_tps, bitnet_rss = _bench_row(local_df)
@@ -1441,12 +1474,14 @@ def plot_mmlu_subject_heatmap(
     """
     Heatmap of MMLU per-subject accuracy for the three locally-measured models.
 
-    Rows are 57 MMLU subjects sorted by BitNet accuracy (worst at top so
-    weak spots are immediately visible).  Columns are the three models.
-    Cells are annotated with accuracy values and colored on a sequential
-    blue scale (higher = darker).
+    Filtered to subjects with substantial cross-model spread (max - min across
+    models >= SPREAD_THRESHOLD percentage points), sorted by spread descending
+    so the most differentiating subjects appear at top.  Columns are models;
+    cells are annotated with accuracy and colored on a sequential blue scale.
     """
     from matplotlib.colors import Normalize
+
+    SPREAD_THRESHOLD = 15.0
 
     models: list[tuple[str, dict]] = []
     for label, full in [
@@ -1465,9 +1500,22 @@ def plot_mmlu_subject_heatmap(
     for _, subj_dict in models:
         all_subjects.update(subj_dict.keys())
 
-    ref_label, ref_subjects = models[-1]
-    subjects_sorted = sorted(all_subjects,
-                             key=lambda s: ref_subjects.get(s, {}).get("accuracy", 0))
+    def subj_accs(subj: str) -> list[float]:
+        return [m[1][subj]["accuracy"] for m in models
+                if subj in m[1] and m[1][subj].get("accuracy") is not None]
+
+    spreads: dict[str, float] = {}
+    for subj in all_subjects:
+        accs = subj_accs(subj)
+        if len(accs) == len(models):
+            spreads[subj] = max(accs) - min(accs)
+
+    differentiating = [s for s, sp in spreads.items() if sp >= SPREAD_THRESHOLD]
+    subjects_sorted = sorted(differentiating, key=lambda s: spreads[s], reverse=True)
+
+    if not subjects_sorted:
+        print(f"Skipping MMLU subject heatmap: no subjects with spread >= {SPREAD_THRESHOLD}pp.")
+        return
 
     n_subj = len(subjects_sorted)
     n_models = len(models)
@@ -1478,16 +1526,19 @@ def plot_mmlu_subject_heatmap(
             if acc is not None:
                 matrix[i, j] = acc
 
-    display_names = [s.replace("_", " ").title() for s in subjects_sorted]
+    display_names = [
+        f"{s.replace('_', ' ').title()}  (Δ{spreads[s]:.0f})"
+        for s in subjects_sorted
+    ]
 
-    fig, ax = plt.subplots(figsize=(max(6, n_models * 2.2), max(14, n_subj * 0.32)))
+    fig, ax = plt.subplots(figsize=(max(7, n_models * 2.2), max(6, n_subj * 0.38)))
     norm = Normalize(vmin=25, vmax=80)
     im = ax.imshow(matrix, aspect="auto", cmap="YlGnBu", norm=norm)
 
     ax.set_xticks(range(n_models))
     ax.set_xticklabels([m[0] for m in models], fontsize=10)
     ax.set_yticks(range(n_subj))
-    ax.set_yticklabels(display_names, fontsize=7)
+    ax.set_yticklabels(display_names, fontsize=8)
     ax.xaxis.set_ticks_position("top")
     ax.xaxis.set_label_position("top")
 
@@ -1498,14 +1549,16 @@ def plot_mmlu_subject_heatmap(
                 continue
             text_color = "white" if val > 62 else "black"
             ax.text(j, i, f"{val:.0f}", ha="center", va="center",
-                    fontsize=6.5, color=text_color)
+                    fontsize=7.5, color=text_color)
 
-    cbar = fig.colorbar(im, ax=ax, shrink=0.5, pad=0.02)
+    cbar = fig.colorbar(im, ax=ax, shrink=0.6, pad=0.02)
     cbar.set_label("Accuracy (%)")
 
+    total_subjects = len(all_subjects)
     ax.set_title(
         "MMLU Per-Subject Accuracy: BitNet b1.58 2B4T vs Qwen2.5 1.5B\n"
-        "(57 subjects, sorted by BitNet accuracy ascending — 5-shot)",
+        f"({n_subj}/{total_subjects} subjects with cross-model spread "
+        f"≥ {SPREAD_THRESHOLD:.0f}pp, sorted by spread — 5-shot)",
         pad=20,
     )
     fig.tight_layout()
@@ -1614,12 +1667,18 @@ def main():
     qwen_q4_df = load_qwen(Path(args.qwen_q4_results))
     qwen_q4_acc = load_accuracy(Path(args.qwen_q4_accuracy))
     qwen_q4_acc_full = load_accuracy_full(Path(args.qwen_q4_accuracy))
+    qwen_q2_df = load_qwen(Path(args.qwen_q2_results))
+    qwen_q2_acc = load_accuracy(Path(args.qwen_q2_accuracy))
+    llama_q4_df = load_qwen(Path(args.llama_q4_results))
+    llama_q4_acc = load_accuracy(Path(args.llama_q4_accuracy))
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     comparison_df = build_comparison_df(
         local_df, local_acc, args.hardware_rate,
         qwen_q8_df, qwen_q8_acc,
         qwen_q4_df, qwen_q4_acc,
+        qwen_q2_df=qwen_q2_df, qwen_q2_acc=qwen_q2_acc,
+        llama_q4_df=llama_q4_df, llama_q4_acc=llama_q4_acc,
         electricity_rate=args.electricity_rate,
     )
     write_comparison_csv(comparison_df, Path(args.csv))

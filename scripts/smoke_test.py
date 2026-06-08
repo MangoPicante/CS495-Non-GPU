@@ -13,10 +13,12 @@ and eval_accuracy.py parse arguments cleanly.
 Exit 0 = all checks passed.  Non-zero = at least one failure.
 
 Usage:
-    python scripts/smoke_test.py              # test all three models
+    python scripts/smoke_test.py              # test all five models
     python scripts/smoke_test.py bitnet       # test BitNet only
     python scripts/smoke_test.py qwen-q8      # test Qwen Q8_0 only
     python scripts/smoke_test.py qwen-q4      # test Qwen Q4_K_M only
+    python scripts/smoke_test.py qwen-q2      # test Qwen Q2_K only
+    python scripts/smoke_test.py llama-q4     # test Llama-3.2-1B Q4_K_M only
     make smoke-test
 """
 
@@ -92,12 +94,16 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 # ── Config ────────────────────────────────────────────────────────────────────
 
 _parser = argparse.ArgumentParser(description="Smoke test for inference models and Phase 4 scripts.")
-_parser.add_argument("model", nargs="?", choices=["bitnet", "qwen-q8", "qwen-q4"], default=None,
-                     help="Which model to test (default: all three)")
+_parser.add_argument("model", nargs="?",
+                     choices=["bitnet", "qwen-q8", "qwen-q4", "qwen-q2", "llama-q4"],
+                     default=None,
+                     help="Which model to test (default: all five)")
 _args = _parser.parse_args()
-RUN_BITNET  = _args.model in (None, "bitnet")
-RUN_QWEN_Q8 = _args.model in (None, "qwen-q8")
-RUN_QWEN_Q4 = _args.model in (None, "qwen-q4")
+RUN_BITNET   = _args.model in (None, "bitnet")
+RUN_QWEN_Q8  = _args.model in (None, "qwen-q8")
+RUN_QWEN_Q4  = _args.model in (None, "qwen-q4")
+RUN_QWEN_Q2  = _args.model in (None, "qwen-q2")
+RUN_LLAMA_Q4 = _args.model in (None, "llama-q4")
 
 ROOT      = Path(__file__).parent.parent
 SCRIPTS   = ROOT / "scripts"
@@ -109,6 +115,10 @@ BITNET_MODEL = BITNET_DIR / "models" / "BitNet-b1.58-2B-4T" / "ggml-model-i2_s.g
 QWEN_DIR      = Path(os.environ.get("QWEN_DIR", ROOT.parent / "Models" / "Qwen"))
 QWEN_Q8_MODEL = QWEN_DIR / "qwen2.5-1.5b-instruct-q8_0.gguf"
 QWEN_Q4_MODEL = QWEN_DIR / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+QWEN_Q2_MODEL = QWEN_DIR / "qwen2.5-1.5b-instruct-q2_k.gguf"
+
+LLAMA_DIR      = Path(os.environ.get("LLAMA_DIR", ROOT.parent / "Models" / "Llama"))
+LLAMA_Q4_MODEL = LLAMA_DIR / "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
 
 
 def _resolve_binary(build_root: Path, name: str) -> Path:
@@ -297,14 +307,19 @@ heading("Model Inference Smoke Tests")
 # Qwen's upstream llama.cpp defaults to interactive conversation mode and ignores
 # stdin EOF; --single-turn makes it process one prompt and exit while still
 # applying the chat template (unlike --no-cnv which strips it and returns nothing).
-bitnet_tps  = smoke_model("BitNet b1.58 2B4T",            BITNET_CLI, BITNET_MODEL) \
-              if RUN_BITNET else []
-qwen_q8_tps    = smoke_model("Qwen2.5-1.5B-Instruct Q8_0",   QWEN_CLI,   QWEN_Q8_MODEL,    ["--single-turn"]) \
-              if RUN_QWEN_Q8 else []
-qwen_q4_tps = smoke_model("Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_CLI,   QWEN_Q4_MODEL, ["--single-turn"]) \
-              if RUN_QWEN_Q4 else []
+bitnet_tps   = smoke_model("BitNet b1.58 2B4T",            BITNET_CLI, BITNET_MODEL) \
+               if RUN_BITNET else []
+qwen_q8_tps  = smoke_model("Qwen2.5-1.5B-Instruct Q8_0",   QWEN_CLI,   QWEN_Q8_MODEL,  ["--single-turn"]) \
+               if RUN_QWEN_Q8 else []
+qwen_q4_tps  = smoke_model("Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_CLI,   QWEN_Q4_MODEL,  ["--single-turn"]) \
+               if RUN_QWEN_Q4 else []
+qwen_q2_tps  = smoke_model("Qwen2.5-1.5B-Instruct Q2_K",   QWEN_CLI,   QWEN_Q2_MODEL,  ["--single-turn"]) \
+               if RUN_QWEN_Q2 else []
+llama_q4_tps = smoke_model("Llama-3.2-1B-Instruct Q4_K_M", QWEN_CLI,   LLAMA_Q4_MODEL, ["--single-turn"]) \
+               if RUN_LLAMA_Q4 else []
 
-if (bitnet_tps and qwen_q8_tps) or (bitnet_tps and qwen_q4_tps) or (qwen_q8_tps and qwen_q4_tps):
+_all_tps = [bitnet_tps, qwen_q8_tps, qwen_q4_tps, qwen_q2_tps, llama_q4_tps]
+if sum(1 for t in _all_tps if t) >= 2:
     heading(f"Cost Comparison  {dim(f'(AWS c5.xlarge @ ${HARDWARE_RATE}/hr)')}")
     hdr = f"{'Model':<35} {'tok/s':>8}   {'$/1k tokens':>13}"
     print(f"  {bold(hdr)}")
@@ -313,6 +328,8 @@ if (bitnet_tps and qwen_q8_tps) or (bitnet_tps and qwen_q4_tps) or (qwen_q8_tps 
         ("BitNet b1.58 2B4T",            bitnet_tps),
         ("Qwen2.5-1.5B-Instruct Q8_0",   qwen_q8_tps),
         ("Qwen2.5-1.5B-Instruct Q4_K_M", qwen_q4_tps),
+        ("Qwen2.5-1.5B-Instruct Q2_K",   qwen_q2_tps),
+        ("Llama-3.2-1B-Instruct Q4_K_M", llama_q4_tps),
     ]:
         if tps_list:
             avg = sum(tps_list) / len(tps_list)
@@ -386,9 +403,11 @@ heading(f"eval_accuracy.py: Accuracy Smoke  {dim(f'(mmlu / arc_easy / arc_challe
 # gaps against both BitNet i2_s and Qwen FP16 paper baselines per task.
 _eval_configs = []
 for _run_flag, _name, _server_bin, _model_path in [
-    (RUN_BITNET,  "BitNet b1.58 2B4T",            BITNET_SERVER, BITNET_MODEL),
-    (RUN_QWEN_Q8, "Qwen2.5-1.5B-Instruct Q8_0",   QWEN_SERVER,   QWEN_Q8_MODEL),
-    (RUN_QWEN_Q4, "Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_SERVER,   QWEN_Q4_MODEL),
+    (RUN_BITNET,   "BitNet b1.58 2B4T",            BITNET_SERVER, BITNET_MODEL),
+    (RUN_QWEN_Q8,  "Qwen2.5-1.5B-Instruct Q8_0",   QWEN_SERVER,   QWEN_Q8_MODEL),
+    (RUN_QWEN_Q4,  "Qwen2.5-1.5B-Instruct Q4_K_M", QWEN_SERVER,   QWEN_Q4_MODEL),
+    (RUN_QWEN_Q2,  "Qwen2.5-1.5B-Instruct Q2_K",   QWEN_SERVER,   QWEN_Q2_MODEL),
+    (RUN_LLAMA_Q4, "Llama-3.2-1B-Instruct Q4_K_M", QWEN_SERVER,   LLAMA_Q4_MODEL),
 ]:
     if not _run_flag:
         continue

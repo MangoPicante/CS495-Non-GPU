@@ -33,6 +33,24 @@ QWEN_Q4_QUANT      := q4_k_m
 QWEN_Q4_FILE       := qwen2.5-1.5b-instruct-$(QWEN_Q4_QUANT).gguf
 QWEN_Q4_MODEL      ?= $(QWEN_DIR)/$(QWEN_Q4_FILE)
 
+# Qwen Q2_K variant — ~2.6 bits/weight (~600 MB), the lowest standard
+# llama.cpp quant for this model.  Closes the bits-per-weight gap to
+# BitNet's ~1.58 bits, isolating "is BitNet's accuracy win about bit
+# depth, or about QAT-from-scratch?"  Same llama.cpp build as Q8/Q4.
+QWEN_Q2_QUANT      := q2_k
+QWEN_Q2_FILE       := qwen2.5-1.5b-instruct-$(QWEN_Q2_QUANT).gguf
+QWEN_Q2_MODEL      ?= $(QWEN_DIR)/$(QWEN_Q2_FILE)
+
+# Llama-3.2-1B-Instruct Q4_K_M — second model family, validates the
+# arXiv:2504.12285 Table 1 published Llama-3.2-1B FP16 baseline against
+# a Q4 measurement on our hardware.  GGUF from bartowski (Meta does not
+# ship GGUFs directly).  Reuses the upstream llama.cpp build (qwen-build).
+LLAMA_DIR          ?= ../Models/Llama
+LLAMA_REPO         := bartowski/Llama-3.2-1B-Instruct-GGUF
+LLAMA_Q4_QUANT     := Q4_K_M
+LLAMA_Q4_FILE      := Llama-3.2-1B-Instruct-$(LLAMA_Q4_QUANT).gguf
+LLAMA_Q4_MODEL     ?= $(LLAMA_DIR)/$(LLAMA_Q4_FILE)
+
 # ── System-card / technical-report PDFs ──────────────────────────────────────
 # These URLs were verified 2026-05-20.  Anthropic rotates the asset hashes
 # in their /m/<hash>/ paths from time to time — if a download 404s, check
@@ -55,18 +73,21 @@ OPUS_47_CARD_URL      := https://www.anthropic.com/claude-opus-4-7-system-card
         bitnet-patch bitnet-build bitnet-model bitnet-verify bitnet-clean \
         qwen-q8-setup qwen-clone qwen-build qwen-q8-model qwen-q8-verify qwen-clean \
         qwen-q4-model qwen-q4-verify \
-        benchmark-bitnet benchmark-qwen-q8 benchmark-qwen-q4 benchmark \
+        qwen-q2-model qwen-q2-verify \
+        llama-q4-model llama-q4-verify llama-clean \
+        benchmark-bitnet benchmark-qwen-q8 benchmark-qwen-q4 benchmark-qwen-q2 benchmark-llama-q4 benchmark \
         benchmark-qwen-q8-on-bitnet-fork \
-        benchmark-threads-bitnet benchmark-threads-qwen-q8 benchmark-threads-qwen-q4 benchmark-threads \
+        benchmark-threads-bitnet benchmark-threads-qwen-q8 benchmark-threads-qwen-q4 \
+        benchmark-threads-qwen-q2 benchmark-threads-llama-q4 benchmark-threads \
         plots marginal-energy \
-        smoke-test smoke-test-bitnet smoke-test-qwen-q8 smoke-test-qwen-q4 \
+        smoke-test smoke-test-bitnet smoke-test-qwen-q8 smoke-test-qwen-q4 smoke-test-qwen-q2 smoke-test-llama-q4 \
         system-cards system-cards-bitnet system-cards-qwen system-cards-cloud \
-        eval-arc-easy-bitnet eval-arc-easy-qwen-q8 eval-arc-easy-qwen-q4 eval-arc-easy \
-        eval-arc-challenge-bitnet eval-arc-challenge-qwen-q8 eval-arc-challenge-qwen-q4 eval-arc-challenge \
-        eval-mmlu-bitnet eval-mmlu-qwen-q8 eval-mmlu-qwen-q4 eval-mmlu \
-        eval-winogrande-bitnet eval-winogrande-qwen-q8 eval-winogrande-qwen-q4 eval-winogrande \
-        eval-hellaswag-bitnet eval-hellaswag-qwen-q8 eval-hellaswag-qwen-q4 eval-hellaswag \
-        eval-accuracy-bitnet eval-accuracy-qwen-q8 eval-accuracy-qwen-q4 eval-accuracy \
+        eval-arc-easy-bitnet eval-arc-easy-qwen-q8 eval-arc-easy-qwen-q4 eval-arc-easy-qwen-q2 eval-arc-easy-llama-q4 eval-arc-easy \
+        eval-arc-challenge-bitnet eval-arc-challenge-qwen-q8 eval-arc-challenge-qwen-q4 eval-arc-challenge-qwen-q2 eval-arc-challenge-llama-q4 eval-arc-challenge \
+        eval-mmlu-bitnet eval-mmlu-qwen-q8 eval-mmlu-qwen-q4 eval-mmlu-qwen-q2 eval-mmlu-llama-q4 eval-mmlu \
+        eval-winogrande-bitnet eval-winogrande-qwen-q8 eval-winogrande-qwen-q4 eval-winogrande-qwen-q2 eval-winogrande-llama-q4 eval-winogrande \
+        eval-hellaswag-bitnet eval-hellaswag-qwen-q8 eval-hellaswag-qwen-q4 eval-hellaswag-qwen-q2 eval-hellaswag-llama-q4 eval-hellaswag \
+        eval-accuracy-bitnet eval-accuracy-qwen-q8 eval-accuracy-qwen-q4 eval-accuracy-qwen-q2 eval-accuracy-llama-q4 eval-accuracy \
         docker-build-x86 docker-build-arm \
         aws-bootstrap-c7g aws-benchmark-c5 aws-benchmark-c6a aws-benchmark-c7g aws-benchmark \
         aws-bootstrap-t4g aws-benchmark-c7i aws-benchmark-t4g aws-benchmark-free-tier \
@@ -102,43 +123,65 @@ help:
 	@echo "  qwen-q8-verify                Quick inference smoke-test with Qwen Q8_0"
 	@echo "  qwen-q4-model                 Download Qwen2.5-1.5B-Instruct Q4_K_M GGUF (reuses qwen-build)"
 	@echo "  qwen-q4-verify                Quick inference smoke-test with Qwen Q4_K_M"
+	@echo "  qwen-q2-model                 Download Qwen2.5-1.5B-Instruct Q2_K GGUF (reuses qwen-build)"
+	@echo "  qwen-q2-verify                Quick inference smoke-test with Qwen Q2_K"
 	@echo "  qwen-clean                    Remove \$$(QWEN_DIR)"
+	@echo ""
+	@echo "Llama-3.2-1B-Instruct baseline (second model family, reuses qwen-build):"
+	@echo "  llama-q4-model                Download Llama-3.2-1B-Instruct Q4_K_M GGUF from $(LLAMA_REPO)"
+	@echo "  llama-q4-verify               Quick inference smoke-test with Llama-3.2-1B Q4_K_M"
 	@echo ""
 	@echo "Benchmarks & analysis:"
 	@echo "  benchmark-bitnet              BitNet inference benchmark (throughput, memory, energy)"
 	@echo "  benchmark-qwen-q8             Qwen Q8_0 inference benchmark"
 	@echo "  benchmark-qwen-q4             Qwen Q4_K_M inference benchmark"
-	@echo "  benchmark                     All three models"
+	@echo "  benchmark-qwen-q2             Qwen Q2_K inference benchmark"
+	@echo "  benchmark-llama-q4            Llama-3.2-1B Q4_K_M inference benchmark"
+	@echo "  benchmark                     All five models"
 	@echo "  eval-arc-easy-bitnet          BitNet ARC-Easy eval (LIMIT=$(LIMIT))"
 	@echo "  eval-arc-easy-qwen-q8         Qwen Q8_0 ARC-Easy eval"
 	@echo "  eval-arc-easy-qwen-q4         Qwen Q4_K_M ARC-Easy eval"
-	@echo "  eval-arc-easy                 All three models ARC-Easy"
+	@echo "  eval-arc-easy-qwen-q2         Qwen Q2_K ARC-Easy eval"
+	@echo "  eval-arc-easy-llama-q4        Llama-3.2-1B Q4_K_M ARC-Easy eval"
+	@echo "  eval-arc-easy                 All five models ARC-Easy"
 	@echo "  eval-arc-challenge-bitnet     BitNet ARC-Challenge eval"
 	@echo "  eval-arc-challenge-qwen-q8    Qwen Q8_0 ARC-Challenge eval"
 	@echo "  eval-arc-challenge-qwen-q4    Qwen Q4_K_M ARC-Challenge eval"
-	@echo "  eval-arc-challenge            All three models ARC-Challenge"
+	@echo "  eval-arc-challenge-qwen-q2    Qwen Q2_K ARC-Challenge eval"
+	@echo "  eval-arc-challenge-llama-q4   Llama-3.2-1B Q4_K_M ARC-Challenge eval"
+	@echo "  eval-arc-challenge            All five models ARC-Challenge"
 	@echo "  eval-mmlu-bitnet              BitNet MMLU 5-shot eval"
 	@echo "  eval-mmlu-qwen-q8             Qwen Q8_0 MMLU 5-shot eval"
 	@echo "  eval-mmlu-qwen-q4             Qwen Q4_K_M MMLU 5-shot eval"
-	@echo "  eval-mmlu                     All three models MMLU"
+	@echo "  eval-mmlu-qwen-q2             Qwen Q2_K MMLU 5-shot eval"
+	@echo "  eval-mmlu-llama-q4            Llama-3.2-1B Q4_K_M MMLU 5-shot eval"
+	@echo "  eval-mmlu                     All five models MMLU"
 	@echo "  eval-winogrande-bitnet        BitNet WinoGrande eval"
 	@echo "  eval-winogrande-qwen-q8       Qwen Q8_0 WinoGrande eval"
 	@echo "  eval-winogrande-qwen-q4       Qwen Q4_K_M WinoGrande eval"
-	@echo "  eval-winogrande               All three models WinoGrande"
+	@echo "  eval-winogrande-qwen-q2       Qwen Q2_K WinoGrande eval"
+	@echo "  eval-winogrande-llama-q4      Llama-3.2-1B Q4_K_M WinoGrande eval"
+	@echo "  eval-winogrande               All five models WinoGrande"
 	@echo "  eval-hellaswag-bitnet         BitNet HellaSwag eval"
 	@echo "  eval-hellaswag-qwen-q8        Qwen Q8_0 HellaSwag eval"
 	@echo "  eval-hellaswag-qwen-q4        Qwen Q4_K_M HellaSwag eval"
-	@echo "  eval-hellaswag                All three models HellaSwag"
+	@echo "  eval-hellaswag-qwen-q2        Qwen Q2_K HellaSwag eval"
+	@echo "  eval-hellaswag-llama-q4       Llama-3.2-1B Q4_K_M HellaSwag eval"
+	@echo "  eval-hellaswag                All five models HellaSwag"
 	@echo "  eval-accuracy-bitnet          All tasks, BitNet only"
 	@echo "  eval-accuracy-qwen-q8         All tasks, Qwen Q8_0 only"
 	@echo "  eval-accuracy-qwen-q4         All tasks, Qwen Q4_K_M only"
-	@echo "  eval-accuracy                 All tasks, all three models"
+	@echo "  eval-accuracy-qwen-q2         All tasks, Qwen Q2_K only"
+	@echo "  eval-accuracy-llama-q4        All tasks, Llama-3.2-1B Q4_K_M only"
+	@echo "  eval-accuracy                 All tasks, all five models"
 	@echo "  plots                         Generate plots + comparison_table.csv from benchmark and accuracy results"
 	@echo "  marginal-energy               Measure CPU idle baseline (90s) and print marginal J/tok per bench row (REPORT.md §4.3)"
-	@echo "  smoke-test                    Verify scripts produce expected outputs (all three models)"
+	@echo "  smoke-test                    Verify scripts produce expected outputs (all five models)"
 	@echo "  smoke-test-bitnet             Verify BitNet inference only"
 	@echo "  smoke-test-qwen-q8            Verify Qwen Q8_0 inference only"
 	@echo "  smoke-test-qwen-q4            Verify Qwen Q4_K_M inference only"
+	@echo "  smoke-test-qwen-q2            Verify Qwen Q2_K inference only"
+	@echo "  smoke-test-llama-q4           Verify Llama-3.2-1B Q4_K_M inference only"
 	@echo ""
 	@echo "System cards / technical reports (one-off PDF downloads):"
 	@echo "  system-cards                  Download every paper / system card used in the comparison"
@@ -315,7 +358,9 @@ bitnet-verify:
 
 BITNET_BENCH_OUT     ?= results/bitnet_step_metrics.csv
 QWEN_Q8_BENCH_OUT    ?= results/qwen_q8_step_metrics.csv
-QWEN_Q4_BENCH_OUT ?= results/qwen_q4_step_metrics.csv
+QWEN_Q4_BENCH_OUT    ?= results/qwen_q4_step_metrics.csv
+QWEN_Q2_BENCH_OUT    ?= results/qwen_q2_step_metrics.csv
+LLAMA_Q4_BENCH_OUT   ?= results/llama_q4_step_metrics.csv
 UBATCH               ?= 128
 
 benchmark-bitnet:
@@ -342,7 +387,23 @@ benchmark-qwen-q4:
 		--threads $(THREADS) \
 		--ubatch $(UBATCH)
 
-benchmark: benchmark-bitnet benchmark-qwen-q8 benchmark-qwen-q4
+benchmark-qwen-q2:
+	$(POETRY) run python scripts/metrics_tracker.py \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(QWEN_Q2_MODEL) \
+		--out $(QWEN_Q2_BENCH_OUT) \
+		--threads $(THREADS) \
+		--ubatch $(UBATCH)
+
+benchmark-llama-q4:
+	$(POETRY) run python scripts/metrics_tracker.py \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(LLAMA_Q4_MODEL) \
+		--out $(LLAMA_Q4_BENCH_OUT) \
+		--threads $(THREADS) \
+		--ubatch $(UBATCH)
+
+benchmark: benchmark-bitnet benchmark-qwen-q8 benchmark-qwen-q4 benchmark-qwen-q2 benchmark-llama-q4
 
 # Sensitivity check (REPORT §6.8): run Qwen Q8_0 against BitNet's
 # llama.cpp fork instead of upstream.  Isolates how much of Qwen's measured
@@ -364,9 +425,11 @@ benchmark-qwen-q8-on-bitnet-fork:
 # dedicated *_thread_sweep.csv files so the main comparison CSVs stay
 # clean at the THREADS=4 reference condition.  Used by compare_runs.py
 # to produce thread_scaling.png and by REPORT §5.4.
-BITNET_THREAD_SWEEP_OUT  ?= results/bitnet_thread_sweep.csv
-QWEN_Q8_THREAD_SWEEP_OUT    ?= results/qwen_q8_thread_sweep.csv
-QWEN_Q4_THREAD_SWEEP_OUT ?= results/qwen_q4_thread_sweep.csv
+BITNET_THREAD_SWEEP_OUT   ?= results/bitnet_thread_sweep.csv
+QWEN_Q8_THREAD_SWEEP_OUT  ?= results/qwen_q8_thread_sweep.csv
+QWEN_Q4_THREAD_SWEEP_OUT  ?= results/qwen_q4_thread_sweep.csv
+QWEN_Q2_THREAD_SWEEP_OUT  ?= results/qwen_q2_thread_sweep.csv
+LLAMA_Q4_THREAD_SWEEP_OUT ?= results/llama_q4_thread_sweep.csv
 
 benchmark-threads-bitnet:
 	# threads=1 deliberately skipped: BitNet's TL2 kernel (BM=160) hits
@@ -392,11 +455,25 @@ benchmark-threads-qwen-q4:
 	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q4_MODEL) --threads 4 --out $(QWEN_Q4_THREAD_SWEEP_OUT) --no-energy
 	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q4_MODEL) --threads 6 --out $(QWEN_Q4_THREAD_SWEEP_OUT) --no-energy
 
-benchmark-threads: benchmark-threads-bitnet benchmark-threads-qwen-q8 benchmark-threads-qwen-q4
+benchmark-threads-qwen-q2:
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q2_MODEL) --threads 1 --out $(QWEN_Q2_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q2_MODEL) --threads 2 --out $(QWEN_Q2_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q2_MODEL) --threads 4 --out $(QWEN_Q2_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(QWEN_Q2_MODEL) --threads 6 --out $(QWEN_Q2_THREAD_SWEEP_OUT) --no-energy
 
-BITNET_ACC_OUT  ?= results/accuracy_results_bitnet.json
-QWEN_Q8_ACC_OUT    ?= results/accuracy_results_qwen_q8.json
-QWEN_Q4_ACC_OUT ?= results/accuracy_results_qwen_q4.json
+benchmark-threads-llama-q4:
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(LLAMA_Q4_MODEL) --threads 1 --out $(LLAMA_Q4_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(LLAMA_Q4_MODEL) --threads 2 --out $(LLAMA_Q4_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(LLAMA_Q4_MODEL) --threads 4 --out $(LLAMA_Q4_THREAD_SWEEP_OUT) --no-energy
+	$(POETRY) run python scripts/metrics_tracker.py --llama-dir $(QWEN_LLAMACPP_DIR) --model $(LLAMA_Q4_MODEL) --threads 6 --out $(LLAMA_Q4_THREAD_SWEEP_OUT) --no-energy
+
+benchmark-threads: benchmark-threads-bitnet benchmark-threads-qwen-q8 benchmark-threads-qwen-q4 benchmark-threads-qwen-q2 benchmark-threads-llama-q4
+
+BITNET_ACC_OUT   ?= results/accuracy_results_bitnet.json
+QWEN_Q8_ACC_OUT  ?= results/accuracy_results_qwen_q8.json
+QWEN_Q4_ACC_OUT  ?= results/accuracy_results_qwen_q4.json
+QWEN_Q2_ACC_OUT  ?= results/accuracy_results_qwen_q2.json
+LLAMA_Q4_ACC_OUT ?= results/accuracy_results_llama_q4.json
 
 eval-arc-easy-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
@@ -427,7 +504,27 @@ eval-arc-easy-qwen-q4:
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
 
-eval-arc-easy: eval-arc-easy-bitnet eval-arc-easy-qwen-q8 eval-arc-easy-qwen-q4
+eval-arc-easy-qwen-q2:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task arc_easy \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(QWEN_Q2_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(QWEN_Q2_ACC_OUT) \
+		--start-server
+
+eval-arc-easy-llama-q4:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task arc_easy \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(LLAMA_Q4_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(LLAMA_Q4_ACC_OUT) \
+		--start-server
+
+eval-arc-easy: eval-arc-easy-bitnet eval-arc-easy-qwen-q8 eval-arc-easy-qwen-q4 eval-arc-easy-qwen-q2 eval-arc-easy-llama-q4
 
 eval-arc-challenge-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
@@ -458,7 +555,27 @@ eval-arc-challenge-qwen-q4:
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
 
-eval-arc-challenge: eval-arc-challenge-bitnet eval-arc-challenge-qwen-q8 eval-arc-challenge-qwen-q4
+eval-arc-challenge-qwen-q2:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task arc_challenge \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(QWEN_Q2_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(QWEN_Q2_ACC_OUT) \
+		--start-server
+
+eval-arc-challenge-llama-q4:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task arc_challenge \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(LLAMA_Q4_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(LLAMA_Q4_ACC_OUT) \
+		--start-server
+
+eval-arc-challenge: eval-arc-challenge-bitnet eval-arc-challenge-qwen-q8 eval-arc-challenge-qwen-q4 eval-arc-challenge-qwen-q2 eval-arc-challenge-llama-q4
 
 eval-mmlu-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
@@ -492,7 +609,29 @@ eval-mmlu-qwen-q4:
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
 
-eval-mmlu: eval-mmlu-bitnet eval-mmlu-qwen-q8 eval-mmlu-qwen-q4
+eval-mmlu-qwen-q2:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task mmlu \
+		--num-fewshot 5 \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(QWEN_Q2_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(QWEN_Q2_ACC_OUT) \
+		--start-server
+
+eval-mmlu-llama-q4:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task mmlu \
+		--num-fewshot 5 \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(LLAMA_Q4_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(LLAMA_Q4_ACC_OUT) \
+		--start-server
+
+eval-mmlu: eval-mmlu-bitnet eval-mmlu-qwen-q8 eval-mmlu-qwen-q4 eval-mmlu-qwen-q2 eval-mmlu-llama-q4
 
 eval-winogrande-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
@@ -523,7 +662,27 @@ eval-winogrande-qwen-q4:
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
 
-eval-winogrande: eval-winogrande-bitnet eval-winogrande-qwen-q8 eval-winogrande-qwen-q4
+eval-winogrande-qwen-q2:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task winogrande \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(QWEN_Q2_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(QWEN_Q2_ACC_OUT) \
+		--start-server
+
+eval-winogrande-llama-q4:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task winogrande \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(LLAMA_Q4_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(LLAMA_Q4_ACC_OUT) \
+		--start-server
+
+eval-winogrande: eval-winogrande-bitnet eval-winogrande-qwen-q8 eval-winogrande-qwen-q4 eval-winogrande-qwen-q2 eval-winogrande-llama-q4
 
 eval-hellaswag-bitnet:
 	$(POETRY) run python scripts/eval_accuracy.py \
@@ -554,7 +713,27 @@ eval-hellaswag-qwen-q4:
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
 
-eval-hellaswag: eval-hellaswag-bitnet eval-hellaswag-qwen-q8 eval-hellaswag-qwen-q4
+eval-hellaswag-qwen-q2:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task hellaswag \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(QWEN_Q2_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(QWEN_Q2_ACC_OUT) \
+		--start-server
+
+eval-hellaswag-llama-q4:
+	$(POETRY) run python scripts/eval_accuracy.py \
+		--task hellaswag \
+		--llama-dir $(QWEN_LLAMACPP_DIR) \
+		--model $(LLAMA_Q4_MODEL) \
+		--threads $(THREADS) \
+		--limit $(LIMIT) \
+		--out $(LLAMA_Q4_ACC_OUT) \
+		--start-server
+
+eval-hellaswag: eval-hellaswag-bitnet eval-hellaswag-qwen-q8 eval-hellaswag-qwen-q4 eval-hellaswag-qwen-q2 eval-hellaswag-llama-q4
 
 eval-accuracy-bitnet: eval-arc-easy-bitnet eval-arc-challenge-bitnet eval-mmlu-bitnet eval-winogrande-bitnet eval-hellaswag-bitnet
 
@@ -562,7 +741,11 @@ eval-accuracy-qwen-q8: eval-arc-easy-qwen-q8 eval-arc-challenge-qwen-q8 eval-mml
 
 eval-accuracy-qwen-q4: eval-arc-easy-qwen-q4 eval-arc-challenge-qwen-q4 eval-mmlu-qwen-q4 eval-winogrande-qwen-q4 eval-hellaswag-qwen-q4
 
-eval-accuracy: eval-accuracy-bitnet eval-accuracy-qwen-q8 eval-accuracy-qwen-q4
+eval-accuracy-qwen-q2: eval-arc-easy-qwen-q2 eval-arc-challenge-qwen-q2 eval-mmlu-qwen-q2 eval-winogrande-qwen-q2 eval-hellaswag-qwen-q2
+
+eval-accuracy-llama-q4: eval-arc-easy-llama-q4 eval-arc-challenge-llama-q4 eval-mmlu-llama-q4 eval-winogrande-llama-q4 eval-hellaswag-llama-q4
+
+eval-accuracy: eval-accuracy-bitnet eval-accuracy-qwen-q8 eval-accuracy-qwen-q4 eval-accuracy-qwen-q2 eval-accuracy-llama-q4
 
 plots:
 	$(POETRY) run python scripts/compare_runs.py
@@ -585,6 +768,12 @@ smoke-test-qwen-q8:
 
 smoke-test-qwen-q4:
 	$(POETRY) run python scripts/smoke_test.py qwen-q4
+
+smoke-test-qwen-q2:
+	$(POETRY) run python scripts/smoke_test.py qwen-q2
+
+smoke-test-llama-q4:
+	$(POETRY) run python scripts/smoke_test.py llama-q4
 
 # ── Qwen2.5 1.5B baseline ─────────────────────────────────────────────────────
 #
@@ -644,8 +833,30 @@ qwen-q4-model:
 qwen-q4-verify:
 	"$(QWEN_CLI)" -m $(QWEN_Q4_MODEL) -p "What is 2+2?" -n 32 -t $(THREADS) --single-turn
 
+# Qwen Q2_K variant — same repo and build, lowest standard quant available.
+qwen-q2-model:
+	hf download $(QWEN_REPO) $(QWEN_Q2_FILE) \
+		--local-dir $(QWEN_DIR)
+
+qwen-q2-verify:
+	"$(QWEN_CLI)" -m $(QWEN_Q2_MODEL) -p "What is 2+2?" -n 32 -t $(THREADS) --single-turn
+
+# Llama-3.2-1B-Instruct Q4_K_M — GGUF from bartowski, reuses qwen-build.
+# (Llama-3 architecture is supported by upstream llama.cpp out of the box;
+# no separate build needed.  Stored under $(LLAMA_DIR) to keep model
+# families separated on disk.)
+llama-q4-model:
+	hf download $(LLAMA_REPO) $(LLAMA_Q4_FILE) \
+		--local-dir $(LLAMA_DIR)
+
+llama-q4-verify:
+	"$(QWEN_CLI)" -m $(LLAMA_Q4_MODEL) -p "What is 2+2?" -n 32 -t $(THREADS) --single-turn
+
 qwen-clean:
 	rm -rf $(QWEN_DIR)
+
+llama-clean:
+	rm -rf $(LLAMA_DIR)
 
 # ── System-card / technical-report downloads ──────────────────────────────────
 #
