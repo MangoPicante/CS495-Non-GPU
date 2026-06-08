@@ -4,11 +4,14 @@ Benchmarking BitNet b1.58 2B4T and Qwen2.5-1.5B on commodity CPU hardware.
 
 This project independently reproduces and extends the inference-efficiency
 claims in [arXiv:2504.12285](https://arxiv.org/abs/2504.12285) (BitNet b1.58
-2B4T) on consumer x86 CPU. It compares three locally measured models —
-**BitNet b1.58 2B4T (i2_s)**, **Qwen2.5-1.5B-Instruct (Q8_0)**, and
-**Qwen2.5-1.5B-Instruct (Q4_K_M)** — against each other and against five
-published FP16 baselines from the paper's Table 1 (LLaMA 3.2 1B, Gemma-3 1B,
-Qwen2.5 1.5B, SmolLM2 1.7B, MiniCPM 2B).
+2B4T) on consumer x86 CPU. It compares **five locally measured models** —
+**BitNet b1.58 2B4T (i2_s)**, **Qwen2.5-1.5B-Instruct (Q8_0, Q4_K_M, Q2_K)**,
+and **Llama-3.2-1B-Instruct (Q4_K_M)** — against each other and against the
+two published FP16 paper baselines that have PTQ counterparts in this study
+(LLaMA 3.2 1B paired with our Llama Q4_K_M; Qwen2.5 1.5B paired with our
+Qwen Q8/Q4/Q2 ours). Three earlier FP16-only rows (Gemma-3 1B, SmolLM2 1.7B,
+MiniCPM 2B) were removed during the Q2/Llama expansion because they had no
+quantized counterpart on the same hardware.
 
 ## Headline finding
 
@@ -16,24 +19,31 @@ Reference workload: `n_prompt=512`, `n_gen=128`, 4 threads on an Intel
 i5-9400F. Full details (methodology, threats to validity, plots) in
 [`REPORT.md`](REPORT.md).
 
-| Metric | BitNet | Qwen Q8_0 | Qwen Q4_K_M |
-|---|---:|---:|---:|
-| Throughput (tok/s) | 21.2 | 15.1 | **24.9** |
-| Peak RSS (MB) | **1,247** | 1,667 | 1,632 |
-| Mean accuracy across 5 tasks (%) | **61.74** | 61.10 | 59.45 |
-| Cost: AWS c5.xlarge proxy ($/1k tok) | 0.00223 | 0.00313 | **0.00190** |
-| Cost: local electricity ($/1k tok) | **0.000131** | 0.000224 | 0.000132 |
+| Metric | BitNet | Qwen Q8_0 | Qwen Q4_K_M | Qwen Q2_K | Llama Q4_K_M |
+|---|---:|---:|---:|---:|---:|
+| Throughput (tok/s) | 21.2 | 15.1 | 24.9 | **32.5** | 29.9 |
+| Peak RSS (MB) | 1,247 | 1,667 | 1,632 | **745** | 1,314 |
+| Mean accuracy across 5 tasks (%) | **61.74** | 61.10 | 59.45 | pending | pending |
+| Cost: AWS c5.xlarge proxy ($/1k tok) | 0.00223 | 0.00313 | 0.00190 | **0.00145** | 0.00158 |
+| Cost: local electricity ($/1k tok) | **0.000131** | 0.000224 | 0.000132 | 0.000162 | 0.000101 |
 
-The three models trace a clean speed/accuracy Pareto: **Q4** wins raw speed
-and AWS-rental cost, **BitNet** wins accuracy, memory, and reasoning tasks
-(WinoGrande +9–12pt), **Q8** has no obvious operational niche unless its
-MMLU edge over Q4 (+1pt) is binding.
+The original three models (BitNet, Q8, Q4) traced a clean speed/accuracy
+Pareto where **BitNet matched Q8's accuracy at near-Q4 speed** while
+winning memory and reasoning tasks (WinoGrande +9–12pt over Qwen). The two
+new variants both undercut the earlier headline:
 
-All three self-hosted models beat every commercial cloud API tier on $/1k
-tokens at this size class — 4.6× cheaper than the cheapest API tier
-(GPT-4o mini) on local electricity, 191× cheaper than Claude Opus 4.7 —
-with the strong caveat that the comparison only holds for workloads where
-a 2B-parameter model's capability is sufficient.
+- **Qwen Q2_K** is the throughput / memory / AWS-rental-cost leader by
+  large margins (~30% over Q4 on speed; ~40% over BitNet on RSS) — pending
+  the accuracy eval that will say whether the deeper quantization holds up.
+- **Llama-3.2-1B Q4_K_M** is the local-electricity cost leader at
+  $0.000101/1k tok, ~23% under BitNet, on a separate model family from
+  Qwen — also pending accuracy.
+
+All five self-hosted models beat every commercial cloud API tier on $/1k
+tokens at this size class — **5.9× cheaper** than the cheapest API tier
+(GPT-4o mini) on local electricity with Llama Q4, **191× cheaper** than
+Claude Opus 4.7 — with the strong caveat that the comparison only holds
+for workloads where a 1–2B-parameter model's capability is sufficient.
 
 ---
 
@@ -64,7 +74,8 @@ External dependencies (cloned and built into sibling directories by the
 `make ...-setup` targets):
 
 - `../Models/BitNet/` — `microsoft/BitNet` at commit `01eb4157` (the inference fork with the TL2 ternary-lookup kernel)
-- `../Models/Qwen/llama.cpp/` — `ggml-org/llama.cpp` at commit `1e5ad35d` (upstream, used for both Qwen variants)
+- `../Models/Qwen/llama.cpp/` — `ggml-org/llama.cpp` at commit `1e5ad35d` (upstream, used for all three Qwen variants and Llama-3.2-1B)
+- `../Models/Llama/` — Llama-3.2-1B-Instruct Q4_K_M GGUF (community quant from bartowski; Meta does not ship official GGUFs)
 - `../Models/Cloud/` — populated by `make system-cards-cloud` with the
   GPT-4o / Claude 4.5 / Claude Opus 4.7 system-card PDFs used by the
   cost-vs-cloud comparison (§3.9 of `REPORT.md`).
@@ -89,11 +100,18 @@ make bitnet-setup
 make bitnet-model
 make bitnet-verify
 
-# Clone + build upstream llama.cpp for Qwen, download both quants
+# Clone + build upstream llama.cpp for Qwen, download all three Qwen quants
 make qwen-q8-setup         # builds + downloads Q8_0
 make qwen-q8-verify
 make qwen-q4-model         # add the Q4_K_M GGUF
 make qwen-q4-verify
+make qwen-q2-model         # add the Q2_K GGUF (deepest Qwen quantization)
+make qwen-q2-verify
+
+# Llama-3.2-1B-Instruct Q4_K_M (second model family — uses the same
+# upstream llama.cpp build from qwen-q8-setup, no separate build)
+make llama-q4-model
+make llama-q4-verify
 
 # Optional: download the paper / system-card PDFs into the Models dirs
 make system-cards          # arXiv reports for BitNet & Qwen, plus the
@@ -101,9 +119,9 @@ make system-cards          # arXiv reports for BitNet & Qwen, plus the
                            # into ../Models/Cloud/
 
 # Verify the full pipeline end-to-end
-make smoke-test            # ~25 min total (8-10 min/model since the MMLU
-                           # 5-shot fix): three prompts each, then a
+make smoke-test            # All five models: three prompts each, then a
                            # 5-sample 5-shot accuracy sweep per model
+                           # (~40-50 min total at 8-10 min/model)
 ```
 
 For the full end-to-end command list (benchmarks, accuracy, plots,
@@ -117,19 +135,21 @@ All commands run from the repo root. The most common targets:
 
 ```bash
 # Inference throughput / memory / energy (writes results/*_step_metrics.csv)
-make benchmark             # All three models at THREADS=4
+make benchmark             # All five models at THREADS=4
 
 # Accuracy evaluation (writes results/accuracy_results_*.json)
-make eval-accuracy         # All three models, all five tasks, LIMIT=500
+make eval-accuracy         # All five models, all five tasks, LIMIT=500
 make eval-accuracy LIMIT=100   # Quick sanity check at smaller sample size
 
 # Per-task evals (ARC-Easy/Challenge, WinoGrande, HellaSwag, MMLU 5-shot)
 make eval-mmlu-bitnet
 make eval-arc-easy-qwen-q8
 make eval-arc-easy-qwen-q4
+make eval-mmlu-qwen-q2
+make eval-mmlu-llama-q4
 # ...see make help for the full list
 
-# Regenerate the comparison table and all 20 plots (incl. cloud comparison)
+# Regenerate the comparison table and all ~23 plots (incl. cloud comparison)
 make plots                 # → results/comparison_table.csv + results/plots/*.png
                            # Plots include cloud_cost_comparison.png,
                            # cloud_accuracy_comparison.png, and
