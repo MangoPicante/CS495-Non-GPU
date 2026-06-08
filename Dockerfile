@@ -114,12 +114,23 @@ RUN git clone https://github.com/ggml-org/llama.cpp.git ${QWEN_DIR}/llama.cpp &&
         -DGGML_NATIVE=ON && \
     cmake --build build --config Release -j
 
-# Both Qwen GGUFs (Q8_0 and Q4_K_M) from the first-party HuggingFace
-# repo — bit-identical to the local Windows benchmark.
+# All three Qwen GGUFs (Q8_0, Q4_K_M, Q2_K) from the first-party
+# HuggingFace repo — bit-identical to the local Windows benchmark.
 RUN cd ${QWEN_DIR} && \
     huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct-GGUF \
         qwen2.5-1.5b-instruct-q8_0.gguf \
         qwen2.5-1.5b-instruct-q4_k_m.gguf \
+        qwen2.5-1.5b-instruct-q2_k.gguf \
+        --local-dir .
+
+# Llama-3.2-1B-Instruct Q4_K_M — second model family (community quant
+# from bartowski; Meta does not ship GGUFs).  Reuses the upstream
+# llama.cpp build from §3 — no separate build needed.
+ENV LLAMA_DIR=/Models/Llama
+RUN mkdir -p ${LLAMA_DIR} && \
+    cd ${LLAMA_DIR} && \
+    huggingface-cli download bartowski/Llama-3.2-1B-Instruct-GGUF \
+        Llama-3.2-1B-Instruct-Q4_K_M.gguf \
         --local-dir .
 
 # ── 4. Install project Python deps via Poetry ────────────────────────────────

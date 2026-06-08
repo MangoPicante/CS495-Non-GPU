@@ -57,3 +57,4 @@ docker-smoke-*.log
 .DS_Store
 Thumbs.db
 desktop.ini
+.aws-*.sh

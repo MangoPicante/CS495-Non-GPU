@@ -114,10 +114,14 @@ QWEN_PAPER = {
 #   BitNet                 → orange (paper hatched, ours solid)
 #   Qwen Q8_0 (ours)       → green
 #   Qwen Q4_K_M (ours)     → purple
+#   Qwen Q2_K (ours)       → red    (deepest Qwen quantization)
+#   Llama Q4_K_M (ours)    → brown  (separate model family from Qwen)
 OTHER_COLOR     = "#4C72B0"
 BITNET_COLOR    = "#DD8452"
-QWEN_Q8_COLOR      = "#55A868"
+QWEN_Q8_COLOR   = "#55A868"
 QWEN_Q4_COLOR   = "#8172B2"
+QWEN_Q2_COLOR   = "#C44E52"
+LLAMA_Q4_COLOR  = "#937860"
 CLOUD_API_COLOR = "#7F7F7F"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -504,26 +508,53 @@ def write_comparison_csv(df: pd.DataFrame, out_path: Path) -> None:
 
 def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
                 qwen_q4_df: pd.DataFrame | None,
-                metric: str) -> tuple[list[str], list[float], list[str], list[str]]:
+                metric: str,
+                qwen_q2_df: pd.DataFrame | None = None,
+                llama_q4_df: pd.DataFrame | None = None,
+                ) -> tuple[list[str], list[float], list[str], list[str]]:
     """
     Build the (labels, values, colors, hatches) tuple for a horizontal bar chart.
 
-    Order: other FP16 paper baselines → Qwen paper FP16 → Qwen Q8 ours →
-    Qwen Q4 ours → BitNet ours → BitNet paper.  Each "ours" row is conditional
-    on local data existing.  `metric` selects which field to read from each
-    paper dict / which bench column.
+    Order pairs each FP16 paper row with its quantized counterpart so the
+    paper→ours delta is visually adjacent:
+      LLaMA 3.2 1B paper → Llama Q4 ours →
+      Qwen 1.5B paper → Qwen Q8 → Q4 → Q2 ours →
+      BitNet ours → BitNet paper.
+
+    Each "ours" row is conditional on local data existing.  `metric` selects
+    which field to read from each paper dict / which bench column.
     """
     metric_col = "throughput_tokens_s" if metric == "throughput_tokens_s" else "peak_rss_mb"
     bitnet_tps, bitnet_rss = _bench_row(local_df)
     bitnet_local = bitnet_tps if metric_col == "throughput_tokens_s" else bitnet_rss
 
-    # Qwen FP16 paper is rendered identically to the other FP16 baselines
-    # (same color, no hatch) so they collapse to a single "FP16 baseline (paper)"
-    # legend entry.
-    labels = list(OTHER_BASELINES.keys()) + ["Qwen2.5 1.5B (paper FP16)"]
-    values = [OTHER_BASELINES[m][metric_col] for m in OTHER_BASELINES] + [QWEN_PAPER[metric_col]]
-    colors  = [OTHER_COLOR] * (len(OTHER_BASELINES) + 1)
-    hatches = [""]          * (len(OTHER_BASELINES) + 1)
+    labels: list[str] = []
+    values: list[float] = []
+    colors: list[str] = []
+    hatches: list[str] = []
+
+    # LLaMA 3.2 1B (paper FP16) — paired with Llama Q4 (ours)
+    for m, paper in OTHER_BASELINES.items():
+        labels.append(m)
+        values.append(paper[metric_col])
+        colors.append(OTHER_COLOR)
+        hatches.append("")
+
+    llama_tps, llama_rss = _bench_row(llama_q4_df) if llama_q4_df is not None else (None, None)
+    llama_val = llama_tps if metric_col == "throughput_tokens_s" else llama_rss
+    if llama_val is not None:
+        labels.append("Llama-3.2-1B-Instruct Q4_K_M (ours)")
+        values.append(llama_val)
+        colors.append(LLAMA_Q4_COLOR)
+        hatches.append("")
+
+    # Qwen 1.5B FP16 paper → Q8 → Q4 → Q2 (ours).  Qwen FP16 paper is rendered
+    # identically to the other FP16 baselines (same color, no hatch) so they
+    # collapse to a single "FP16 baseline (paper)" legend entry.
+    labels.append("Qwen2.5 1.5B (paper FP16)")
+    values.append(QWEN_PAPER[metric_col])
+    colors.append(OTHER_COLOR)
+    hatches.append("")
 
     q8_tps, q8_rss = _bench_row(qwen_q8_df) if qwen_q8_df is not None else (None, None)
     q8_val = q8_tps if metric_col == "throughput_tokens_s" else q8_rss
@@ -541,6 +572,14 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         colors.append(QWEN_Q4_COLOR)
         hatches.append("")
 
+    q2_tps, q2_rss = _bench_row(qwen_q2_df) if qwen_q2_df is not None else (None, None)
+    q2_val = q2_tps if metric_col == "throughput_tokens_s" else q2_rss
+    if q2_val is not None:
+        labels.append("Qwen2.5-1.5B-Instruct Q2_K (ours)")
+        values.append(q2_val)
+        colors.append(QWEN_Q2_COLOR)
+        hatches.append("")
+
     if bitnet_local is not None:
         labels.append("BitNet b1.58 2B4T (ours)")
         values.append(bitnet_local)
@@ -555,18 +594,24 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
     return labels, values, colors, hatches
 
 
-def _legend_handles(qwen_q8_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | None = None):
+def _legend_handles(qwen_q8_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | None = None,
+                    qwen_q2_df: pd.DataFrame | None = None,
+                    llama_q4_df: pd.DataFrame | None = None):
     from matplotlib.patches import Patch
-    # All FP16 papers (including Qwen2.5 1.5B) share a single legend entry so
-    # the legend doesn't double-count Qwen as both "FP16 baseline" and a
-    # standalone hatched series.
+    # All FP16 papers (including Qwen2.5 1.5B and LLaMA 3.2 1B) share a single
+    # legend entry so the legend doesn't double-count them as both
+    # "FP16 baseline" and standalone hatched series.
     handles = [
         Patch(facecolor=OTHER_COLOR, edgecolor="#cccccc", label="FP16 baseline (paper)"),
     ]
+    if llama_q4_df is not None:
+        handles.append(Patch(facecolor=LLAMA_Q4_COLOR, edgecolor="#cccccc", label="Llama-3.2-1B Q4_K_M (ours)"))
     if qwen_q8_df is not None:
         handles.append(Patch(facecolor=QWEN_Q8_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q8_0 (ours)"))
     if qwen_q4_df is not None:
         handles.append(Patch(facecolor=QWEN_Q4_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q4_K_M (ours)"))
+    if qwen_q2_df is not None:
+        handles.append(Patch(facecolor=QWEN_Q2_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q2_K (ours)"))
     handles += [
         Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc", label="BitNet b1.58 2B4T (ours)"),
         Patch(facecolor=BITNET_COLOR, hatch="///", edgecolor="#444444", label="BitNet b1.58 2B4T (paper)"),
@@ -576,25 +621,33 @@ def _legend_handles(qwen_q8_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | 
 
 def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
                     qwen_q8_df: pd.DataFrame | None = None,
-                    qwen_q4_df: pd.DataFrame | None = None):
+                    qwen_q4_df: pd.DataFrame | None = None,
+                    qwen_q2_df: pd.DataFrame | None = None,
+                    llama_q4_df: pd.DataFrame | None = None):
     """
     Single unified throughput plot with two panels:
 
       (a) Cross-model bar chart at (n_prompt=512, n_gen=128) — paper FP16
-          baselines + BitNet (paper, ours) + Qwen (paper FP16, Q8 ours, Q4 ours).
+          baselines + BitNet (paper, ours) + Qwen (paper FP16, Q8/Q4/Q2 ours)
+          + Llama (paper FP16, Q4 ours).
       (b) Per-config sensitivity — grouped bars across the three benchmarked
-          (n_prompt, n_gen) configs for our three locally measured models.
-          The paper FP16 baselines only publish numbers at (512, 128), so
-          they don't appear in this panel.
+          (n_prompt, n_gen) configs for our locally measured models.  The
+          paper FP16 baselines only publish numbers at (512, 128), so they
+          don't appear in this panel.
     """
     has_b  = _has_bench_data(local_df)
     has_q8 = _has_bench_data(qwen_q8_df)
     has_q4 = _has_bench_data(qwen_q4_df)
-    if not (has_b or has_q8 or has_q4):
+    has_q2 = _has_bench_data(qwen_q2_df)
+    has_llama = _has_bench_data(llama_q4_df)
+    if not (has_b or has_q8 or has_q4 or has_q2 or has_llama):
         print("Skipping throughput plot: no benchmark CSVs (run 'make benchmark').")
         return
 
-    labels, values, colors, hatches = _bar_series(local_df, qwen_q8_df, qwen_q4_df, "throughput_tokens_s")
+    labels, values, colors, hatches = _bar_series(
+        local_df, qwen_q8_df, qwen_q4_df, "throughput_tokens_s",
+        qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df,
+    )
     fig = plt.figure(figsize=(13, max(9, len(labels) * 0.55 + 4)))
     gs = fig.add_gridspec(2, 1, height_ratios=[len(labels) * 0.55, 4.5], hspace=0.35)
     ax_main = fig.add_subplot(gs[0])
@@ -612,18 +665,25 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
     ax_main.set_title("(a) Cross-model comparison at n_prompt=512, n_gen=128", loc="left")
     ax_main.set_xlim(0, max_val * 1.15)
     ax_main.invert_yaxis()
-    ax_main.legend(handles=_legend_handles(qwen_q8_df, qwen_q4_df), loc="upper right", fontsize=8)
+    ax_main.legend(
+        handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df, llama_q4_df),
+        loc="upper right", fontsize=8,
+    )
 
     # ── (b) Per-config sensitivity for the locally measured models ───────
     configs = [(512, 128), (512, 512), (1, 512)]
     config_labels = [f"p={p} / g={g}" for p, g in configs]
     series = []
+    if has_llama:
+        series.append(("Llama-3.2-1B Q4_K_M",  llama_q4_df, LLAMA_Q4_COLOR))
     if has_q8:
-        series.append(("Qwen2.5-1.5B Q8_0",   qwen_q8_df,    QWEN_Q8_COLOR))
+        series.append(("Qwen2.5-1.5B Q8_0",    qwen_q8_df,  QWEN_Q8_COLOR))
     if has_q4:
-        series.append(("Qwen2.5-1.5B Q4_K_M", qwen_q4_df, QWEN_Q4_COLOR))
+        series.append(("Qwen2.5-1.5B Q4_K_M",  qwen_q4_df,  QWEN_Q4_COLOR))
+    if has_q2:
+        series.append(("Qwen2.5-1.5B Q2_K",    qwen_q2_df,  QWEN_Q2_COLOR))
     if has_b:
-        series.append(("BitNet b1.58 2B4T",   local_df,   BITNET_COLOR))
+        series.append(("BitNet b1.58 2B4T",    local_df,    BITNET_COLOR))
 
     x = np.arange(len(configs))
     width = 0.8 / max(len(series), 1)
@@ -750,14 +810,17 @@ def _arch_csv_path(subdir: str | None, filename: str) -> Path:
 
 
 def _load_arch_throughput(subdir: str | None) -> dict[str, float] | None:
-    """Read the (512, 128) reference-config throughput for each of the three
-    models from a given results subdirectory.  Returns None if no model CSV
-    is readable under that subdir (so the caller can skip the arch entirely)."""
+    """Read the (512, 128) reference-config throughput for each of the
+    locally-measured models from a given results subdirectory.  Returns
+    None if no model CSV is readable under that subdir (so the caller
+    can skip the arch entirely)."""
     out: dict[str, float] = {}
     for model, filename in [
         ("BitNet b1.58 2B4T",    "bitnet_step_metrics.csv"),
         ("Qwen2.5-1.5B Q8_0",    "qwen_q8_step_metrics.csv"),
         ("Qwen2.5-1.5B Q4_K_M",  "qwen_q4_step_metrics.csv"),
+        ("Qwen2.5-1.5B Q2_K",    "qwen_q2_step_metrics.csv"),
+        ("Llama-3.2-1B Q4_K_M",  "llama_q4_step_metrics.csv"),
     ]:
         path = _arch_csv_path(subdir, filename)
         if not path.exists() or path.stat().st_size == 0:
@@ -777,11 +840,10 @@ def plot_cross_arch_throughput(out_dir: Path):
     Throughput across (architecture, model) at the (512, 128) reference config.
 
     Bars grouped by model on the x-axis; one bar per architecture within
-    each group.  Reads from results/{,linux_docker_x86,aws_c5_xlarge,
-    aws_c6a_xlarge,aws_c7g_xlarge}/{bitnet,qwen_q8,qwen_q4}_step_metrics.csv
-    per CROSS_ARCH_SOURCES.  Architectures with no readable CSVs are
-    dropped silently so the plot degrades gracefully while the AWS
-    sweep is being filled in.
+    each group.  Reads from results/<subdir>/{bitnet,qwen_q8,qwen_q4,
+    qwen_q2,llama_q4}_step_metrics.csv per CROSS_ARCH_SOURCES.  Models
+    and architectures with no readable CSVs are dropped silently so the
+    plot degrades gracefully while the AWS sweep is being filled in.
 
     Backs REPORT §6.1 (cross-architecture generalization): if BitNet's
     advantage over Qwen Q8 holds on AMD AVX2 and ARM Neon, the Pareto
@@ -804,7 +866,14 @@ def plot_cross_arch_throughput(out_dir: Path):
               "has data (run `make aws-benchmark` to populate others).")
         return
 
-    models = ["BitNet b1.58 2B4T", "Qwen2.5-1.5B Q8_0", "Qwen2.5-1.5B Q4_K_M"]
+    # Restrict to models that have a measurement on at least one architecture
+    # so the plot doesn't reserve x-slots for models that nothing populates.
+    candidate_models = [
+        "BitNet b1.58 2B4T", "Qwen2.5-1.5B Q8_0", "Qwen2.5-1.5B Q4_K_M",
+        "Qwen2.5-1.5B Q2_K", "Llama-3.2-1B Q4_K_M",
+    ]
+    models = [m for m in candidate_models
+              if any(m in data for _, _, data in archs)]
     n_models = len(models)
     n_archs = len(archs)
     bar_width = 0.8 / n_archs
@@ -844,11 +913,17 @@ def plot_cross_arch_throughput(out_dir: Path):
 
 def plot_memory(local_df: pd.DataFrame, out_dir: Path,
                 qwen_q8_df: pd.DataFrame | None = None,
-                qwen_q4_df: pd.DataFrame | None = None):
-    if not _has_bench_data(local_df) and not _has_bench_data(qwen_q8_df) and not _has_bench_data(qwen_q4_df):
+                qwen_q4_df: pd.DataFrame | None = None,
+                qwen_q2_df: pd.DataFrame | None = None,
+                llama_q4_df: pd.DataFrame | None = None):
+    if not any(_has_bench_data(d) for d in
+               (local_df, qwen_q8_df, qwen_q4_df, qwen_q2_df, llama_q4_df)):
         print("Skipping memory plot: no benchmark CSVs (run 'make benchmark').")
         return
-    labels, values, colors, hatches = _bar_series(local_df, qwen_q8_df, qwen_q4_df, "peak_rss_mb")
+    labels, values, colors, hatches = _bar_series(
+        local_df, qwen_q8_df, qwen_q4_df, "peak_rss_mb",
+        qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df,
+    )
 
     fig, ax = plt.subplots(figsize=(10, max(5, len(labels) * 0.55)))
     max_val = max(v for v in values if v) or 1
@@ -859,11 +934,14 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path,
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels(labels)
     ax.set_xlabel("Peak RSS (MB)")
-    ax.set_title("Peak Memory: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
+    ax.set_title("Peak Memory: BitNet b1.58 2B4T, Qwen2.5 1.5B & Llama-3.2 1B vs FP16 Baselines\n"
                  "(n_prompt=512, n_gen=128, CPU)")
     ax.set_xlim(0, max_val * 1.18)
     ax.invert_yaxis()
-    ax.legend(handles=_legend_handles(qwen_q8_df, qwen_q4_df), loc="lower right", fontsize=8)
+    ax.legend(
+        handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df, llama_q4_df),
+        loc="lower right", fontsize=8,
+    )
     fig.tight_layout()
     path = out_dir / "memory_comparison.png"
     fig.savefig(path, dpi=150)
@@ -873,19 +951,29 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path,
 
 def plot_accuracy(local_acc: dict, out_dir: Path,
                   qwen_q8_acc: dict | None = None,
-                  qwen_q4_acc: dict | None = None):
+                  qwen_q4_acc: dict | None = None,
+                  qwen_q2_acc: dict | None = None,
+                  llama_q4_acc: dict | None = None):
     tasks = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
     task_labels = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
     task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
     other_models = list(OTHER_BASELINES.keys())
-    # Column order: other FP16 paper baselines → Qwen paper FP16 → Qwen Q8/Q4
-    # ours → BitNet ours → BitNet paper.
-    all_models = other_models + ["Qwen2.5 1.5B\n(paper FP16)"]
+    # Column order: LLaMA paper FP16 → Llama Q4 ours → Qwen paper FP16 →
+    # Qwen Q8/Q4/Q2 ours → BitNet ours → BitNet paper.  Each FP16 paper row
+    # sits next to its locally-measured quantized counterpart.
+    all_models = list(other_models)
+    extra_accs: list[dict] = []
+    if llama_q4_acc is not None:
+        all_models.append("Llama-3.2-1B\nQ4_K_M (ours)")
+        extra_accs.append(llama_q4_acc)
+    all_models.append("Qwen2.5 1.5B\n(paper FP16)")
     if qwen_q8_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ8_0 (ours)")
     if qwen_q4_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ4_K_M (ours)")
+    if qwen_q2_acc is not None:
+        all_models.append("Qwen2.5-1.5B\nQ2_K (ours)")
     all_models += ["BitNet b1.58 2B4T\n(ours)", "BitNet b1.58 2B4T\n(paper)"]
 
     x = np.arange(len(all_models))
@@ -895,14 +983,16 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
 
     fig, ax = plt.subplots(figsize=(max(14, len(all_models) * 1.6), 6))
     for i, (task, label, color) in enumerate(zip(tasks, task_labels, task_colors)):
-        vals = (
-            [OTHER_BASELINES[m][task] for m in other_models]
-            + [QWEN_PAPER[task]]
-        )
+        vals: list[float] = [OTHER_BASELINES[m][task] for m in other_models]
+        if llama_q4_acc is not None:
+            vals.append(llama_q4_acc.get(task) or 0)
+        vals.append(QWEN_PAPER[task])
         if qwen_q8_acc is not None:
             vals.append(qwen_q8_acc.get(task) or 0)
         if qwen_q4_acc is not None:
             vals.append(qwen_q4_acc.get(task) or 0)
+        if qwen_q2_acc is not None:
+            vals.append(qwen_q2_acc.get(task) or 0)
         vals += [local_acc.get(task) or 0, BITNET_PAPER[task]]
         ax.bar(x + offsets[i], vals, width, label=label, color=color)
 
@@ -911,7 +1001,7 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
     ax.set_ylabel("Accuracy (%)")
     ax.set_ylim(0, 105)
     ax.set_title(
-        "Accuracy Comparison: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
+        "Accuracy Comparison: BitNet b1.58 2B4T, Qwen2.5 1.5B & Llama-3.2 1B vs FP16 Baselines\n"
         "(0-shot except MMLU 5-shot; WinoGrande & HellaSwag use continuation scoring)"
     )
     ax.legend()
@@ -970,7 +1060,10 @@ def _accuracy_scatter(
 
     QWEN_OURS_NAME    = "Qwen2.5-1.5B-Instruct Q8_0"
     QWEN_Q4_OURS_NAME = "Qwen2.5-1.5B-Instruct Q4_K_M"
+    QWEN_Q2_OURS_NAME = "Qwen2.5-1.5B-Instruct Q2_K"
+    LLAMA_Q4_OURS_NAME = "Llama-3.2-1B-Instruct Q4_K_M"
     QWEN_PAPER_NAME   = "Qwen2.5 1.5B"
+    LLAMA_PAPER_NAME  = "LLaMA 3.2 1B"
     BITNET_NAME       = "BitNet b1.58 2B4T"
 
     by_key = {
@@ -978,11 +1071,14 @@ def _accuracy_scatter(
         for _, row in plot_df.iterrows()
     }
     # Dotted connectors visualize the paper→ours or quant-chain delta.
-    # For Qwen the chain is FP16 paper → Q8 ours → Q4 ours.
+    # Qwen chain: FP16 paper → Q8 → Q4 → Q2 (ours).
+    # Llama chain: FP16 paper → Q4 (ours).
     for ours_key, from_key, color in [
-        ((BITNET_NAME, "ours"),       (BITNET_NAME, "paper"),            BITNET_COLOR),
-        ((QWEN_OURS_NAME, "ours"),    (QWEN_PAPER_NAME, "paper (FP16)"), QWEN_Q8_COLOR),
-        ((QWEN_Q4_OURS_NAME, "ours"), (QWEN_OURS_NAME, "ours"),          QWEN_Q4_COLOR),
+        ((BITNET_NAME, "ours"),         (BITNET_NAME, "paper"),             BITNET_COLOR),
+        ((QWEN_OURS_NAME, "ours"),      (QWEN_PAPER_NAME, "paper (FP16)"),  QWEN_Q8_COLOR),
+        ((QWEN_Q4_OURS_NAME, "ours"),   (QWEN_OURS_NAME, "ours"),           QWEN_Q4_COLOR),
+        ((QWEN_Q2_OURS_NAME, "ours"),   (QWEN_Q4_OURS_NAME, "ours"),        QWEN_Q2_COLOR),
+        ((LLAMA_Q4_OURS_NAME, "ours"),  (LLAMA_PAPER_NAME, "paper (FP16)"), LLAMA_Q4_COLOR),
     ]:
         if ours_key in by_key and from_key in by_key:
             x0, y0 = by_key[from_key]
@@ -992,19 +1088,25 @@ def _accuracy_scatter(
     for _, row in plot_df.iterrows():
         source, model = row["source"], row["model"]
         is_qwen_q8_ours    = source == "ours" and model == QWEN_OURS_NAME
-        is_qwen_q4_ours = source == "ours" and model == QWEN_Q4_OURS_NAME
+        is_qwen_q4_ours    = source == "ours" and model == QWEN_Q4_OURS_NAME
+        is_qwen_q2_ours    = source == "ours" and model == QWEN_Q2_OURS_NAME
+        is_llama_q4_ours   = source == "ours" and model == LLAMA_Q4_OURS_NAME
         is_ours = source == "ours"
-        # Qwen FP16 paper collapses into the generic "FP16 baseline (paper)"
-        # legend entry — same color, same marker, same label as the other
-        # paper FP16 rows.
+        # Qwen / LLaMA FP16 paper rows collapse into the generic
+        # "FP16 baseline (paper)" legend entry — same color, marker, label as
+        # the other paper FP16 rows.
         if source == "paper (FP16)":
             color, label = OTHER_COLOR, "FP16 baseline (paper)"
         elif source == "paper":
             color, label = BITNET_COLOR, "BitNet b1.58 2B4T (paper)"
+        elif is_qwen_q2_ours:
+            color, label = QWEN_Q2_COLOR, "Qwen2.5-1.5B Q2_K (ours)"
         elif is_qwen_q4_ours:
             color, label = QWEN_Q4_COLOR, "Qwen2.5-1.5B Q4_K_M (ours)"
         elif is_qwen_q8_ours:
             color, label = QWEN_Q8_COLOR, "Qwen2.5-1.5B Q8_0 (ours)"
+        elif is_llama_q4_ours:
+            color, label = LLAMA_Q4_COLOR, "Llama-3.2-1B Q4_K_M (ours)"
         else:
             color, label = BITNET_COLOR, "BitNet b1.58 2B4T (ours)"
 
@@ -1017,19 +1119,24 @@ def _accuracy_scatter(
                        facecolors="white", edgecolors=color, marker="o",
                        s=110, linewidths=2, label=label, zorder=3)
 
-        # Paper annotations use the full model name ("BitNet b1.58 2B4T (paper)",
-        # "Qwen2.5 1.5B (paper)") to match the naming convention in the CSV and
-        # other plots.  Our-measurement annotations stay abbreviated and keep the
-        # quant suffix so Q8 and Q4 are distinguishable at a glance.
+        # Paper annotations use the full model name to match the naming
+        # convention in the CSV and other plots.  Our-measurement annotations
+        # stay abbreviated and keep the quant suffix so each variant is
+        # distinguishable at a glance.
         if is_ours:
             ann = (model
                    .replace(" b1.58 2B4T", "")
-                   .replace("Qwen2.5-1.5B-Instruct ", "Qwen ")) + " (ours)"
+                   .replace("Qwen2.5-1.5B-Instruct ", "Qwen ")
+                   .replace("Llama-3.2-1B-Instruct ", "Llama ")) + " (ours)"
         else:
             ann = model.replace(" (FP16)", "") + " (paper)"
-        # Stagger ours offsets so Q8 and Q4 don't overlap when their points sit close.
-        if is_qwen_q4_ours:
+        # Stagger ours offsets so co-located points don't overlap.
+        if is_qwen_q2_ours:
+            xy_offset = (8, -34)
+        elif is_qwen_q4_ours:
             xy_offset = (8, -22)
+        elif is_llama_q4_ours:
+            xy_offset = (-90, -10)
         elif is_ours:
             xy_offset = (8, -10)
         else:
@@ -1082,18 +1189,16 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
 
 def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
                        out_dir: Path, qwen_q4_df: pd.DataFrame | None = None,
-                       electricity_rate: float = DEFAULT_ELECTRICITY_RATE):
+                       qwen_q2_df: pd.DataFrame | None = None,
+                       llama_q4_df: pd.DataFrame | None = None):
     """
-    Three-panel energy + carbon + dollar-cost footprint per 1,000 tokens
-    at n_prompt=512, n_gen=128.
+    Energy + carbon footprint per 1,000 tokens at n_prompt=512, n_gen=128.
 
-      Left:   Wh per 1k tokens     = energy_kwh × 1e6 / (n_prompt + n_gen)
-      Middle: gCO₂ per 1k tokens   = co2_kg    × 1e6 / (n_prompt + n_gen)
-      Right:  USD per 1k tokens    = energy_kwh × rate × 1000 / (n_prompt + n_gen)
-
-    Carbon depends on the local grid's intensity (codecarbon resolves this from
-    geolocation at run time); dollar cost depends on the local electricity rate.
-    Both are properties of where the bench ran, not the model.
+    Single panel of horizontal bars; carbon shares the energy axis via a
+    top-side twin axis transformed by the run's grid intensity
+    (g CO₂ / kWh), which CodeCarbon resolves once per location.  Carbon
+    is exactly proportional to energy at a given location, so the twin
+    axis is an exact relabeling, not a separate measurement.
 
     FP16 baselines aren't shown — the paper doesn't report energy/CO₂.  Skips
     silently if no metrics CSV has populated energy_kwh.
@@ -1109,65 +1214,73 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         return float(vals.median() * scale / (512 + 128))
 
     # Wh = kWh × 1000;  g = kg × 1000.  Both × 1000 again to express "per 1k tokens".
-    bitnet_wh    = per_1k(local_df,   "energy_kwh", 1_000_000)
-    qwen_q8_wh      = per_1k(qwen_q8_df,    "energy_kwh", 1_000_000)
-    qwen_q4_wh   = per_1k(qwen_q4_df, "energy_kwh", 1_000_000)
-    bitnet_gco2  = per_1k(local_df,   "co2_kg",     1_000_000)
-    qwen_q8_gco2    = per_1k(qwen_q8_df,    "co2_kg",     1_000_000)
-    qwen_q4_gco2 = per_1k(qwen_q4_df, "co2_kg",     1_000_000)
-    bitnet_usd   = energy_cost_per_1k(local_df,   electricity_rate)
-    qwen_q8_usd     = energy_cost_per_1k(qwen_q8_df,    electricity_rate)
-    qwen_q4_usd  = energy_cost_per_1k(qwen_q4_df, electricity_rate)
+    bitnet_wh    = per_1k(local_df,    "energy_kwh", 1_000_000)
+    qwen_q8_wh   = per_1k(qwen_q8_df,  "energy_kwh", 1_000_000)
+    qwen_q4_wh   = per_1k(qwen_q4_df,  "energy_kwh", 1_000_000)
+    qwen_q2_wh   = per_1k(qwen_q2_df,  "energy_kwh", 1_000_000)
+    llama_wh     = per_1k(llama_q4_df, "energy_kwh", 1_000_000)
+    bitnet_gco2  = per_1k(local_df,    "co2_kg",     1_000_000)
+    qwen_q8_gco2 = per_1k(qwen_q8_df,  "co2_kg",     1_000_000)
+    qwen_q4_gco2 = per_1k(qwen_q4_df,  "co2_kg",     1_000_000)
+    qwen_q2_gco2 = per_1k(qwen_q2_df,  "co2_kg",     1_000_000)
+    llama_gco2   = per_1k(llama_q4_df, "co2_kg",     1_000_000)
 
-    if bitnet_wh is None and qwen_q8_wh is None and qwen_q4_wh is None:
+    if all(v is None for v in (bitnet_wh, qwen_q8_wh, qwen_q4_wh, qwen_q2_wh, llama_wh)):
         print("Skipping energy/carbon plot: no energy_kwh data in benchmark CSVs.")
         return
 
-    rows: list[tuple[str, str, float | None, float | None, float | None]] = []
+    rows: list[tuple[str, str, float | None, float | None]] = []
+    if llama_wh is not None:
+        rows.append(("Llama-3.2-1B Q4_K_M (ours)", LLAMA_Q4_COLOR, llama_wh, llama_gco2))
     if qwen_q8_wh is not None:
-        rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_Q8_COLOR, qwen_q8_wh, qwen_q8_gco2, qwen_q8_usd))
+        rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_Q8_COLOR, qwen_q8_wh, qwen_q8_gco2))
     if qwen_q4_wh is not None:
-        rows.append(("Qwen2.5-1.5B Q4_K_M (ours)", QWEN_Q4_COLOR, qwen_q4_wh, qwen_q4_gco2, qwen_q4_usd))
+        rows.append(("Qwen2.5-1.5B Q4_K_M (ours)", QWEN_Q4_COLOR, qwen_q4_wh, qwen_q4_gco2))
+    if qwen_q2_wh is not None:
+        rows.append(("Qwen2.5-1.5B Q2_K (ours)", QWEN_Q2_COLOR, qwen_q2_wh, qwen_q2_gco2))
     if bitnet_wh is not None:
-        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2, bitnet_usd))
+        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2))
 
-    fig, (ax_e, ax_c, ax_d) = plt.subplots(
-        1, 3, figsize=(17, max(3.5, len(rows) * 1.2)), sharey=True
+    # Grid intensity (g CO₂ per Wh) is constant per location — derive from any
+    # row with both metrics so the twin axis is an exact relabeling.  Average
+    # across rows to absorb floating-point noise in per_1k's median step.
+    pairs = [(r[2], r[3]) for r in rows if r[2] and r[3]]
+    g_per_wh = (sum(c / e for e, c in pairs) / len(pairs)) if pairs else None
+
+    fig, ax = plt.subplots(figsize=(11, max(3.5, len(rows) * 0.9 + 1)))
+    finite_wh = [r[2] for r in rows if r[2] is not None]
+    max_wh = max(finite_wh) if finite_wh else 1.0
+    for i, (label, color, wh, gco2) in enumerate(rows):
+        if wh is None:
+            ax.text(0, i, "  (no data)", va="center", fontsize=9, color="#888")
+            continue
+        ax.barh(i, wh, color=color, edgecolor="#444444", linewidth=0.5)
+        annotation = f"{wh:.2f} Wh"
+        if gco2 is not None:
+            annotation += f"   ·   {gco2:.3f} g CO₂"
+        ax.text(wh + max_wh * 0.02, i, annotation, va="center", fontsize=10)
+
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([r[0] for r in rows])
+    ax.invert_yaxis()
+    ax.set_xlim(0, max_wh * 1.45)
+    ax.set_xlabel("Energy per 1,000 tokens (Wh)")
+    ax.grid(axis="x", alpha=0.3)
+
+    if g_per_wh is not None:
+        ax_c = ax.secondary_xaxis(
+            "top", functions=(lambda x: x * g_per_wh, lambda x: x / g_per_wh)
+        )
+        ax_c.set_xlabel(
+            f"Carbon emissions per 1,000 tokens (g CO₂  ·  "
+            f"grid intensity ≈ {g_per_wh * 1000:.0f} g/kWh)"
+        )
+
+    ax.set_title(
+        "Inference Energy and Carbon per 1,000 tokens\n"
+        "(CPU at n_prompt=512, n_gen=128; CO₂ axis = energy × local grid intensity from CodeCarbon)"
     )
-
-    def _draw_panel(ax, values: list[float | None], fmt: str):
-        finite = [v for v in values if v is not None]
-        max_val = max(finite) if finite else 1
-        for i, val in enumerate(values):
-            if val is None:
-                ax.text(0, i, "  (no data)", va="center", fontsize=9, color="#888")
-                continue
-            ax.barh(i, val, color=rows[i][1], edgecolor="#444444", linewidth=0.5)
-            ax.text(val + max_val * 0.02, i, fmt.format(val),
-                    va="center", fontsize=10)
-        ax.set_xlim(0, max_val * 1.3)
-
-    ax_e.set_yticks(range(len(rows)))
-    ax_e.set_yticklabels([r[0] for r in rows])
-    ax_e.invert_yaxis()
-    _draw_panel(ax_e, [r[2] for r in rows], "{:.2f} Wh")
-    _draw_panel(ax_c, [r[3] for r in rows], "{:.3f} g")
-    _draw_panel(ax_d, [r[4] for r in rows], "${:.5f}")
-
-    ax_e.set_xlabel("Energy per 1,000 tokens (Wh)")
-    ax_c.set_xlabel("Carbon emissions per 1,000 tokens (g CO₂)")
-    ax_d.set_xlabel(f"Energy cost per 1,000 tokens (USD @ ${electricity_rate:.2f}/kWh)")
-    ax_e.set_title("Energy")
-    ax_c.set_title("Carbon")
-    ax_d.set_title("Cost (electricity)")
-
-    fig.suptitle(
-        "Inference Energy, Carbon, and Cost per 1,000 tokens\n"
-        "(BitNet vs Qwen on CPU at n_prompt=512, n_gen=128; "
-        "CO₂ uses local grid intensity from CodeCarbon)",
-        fontsize=11,
-    )
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.tight_layout()
     path = out_dir / "energy_carbon_comparison.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -1179,7 +1292,9 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
                                qwen_q4_df: pd.DataFrame | None,
                                out_dir: Path,
                                hardware_rate: float,
-                               electricity_rate: float):
+                               electricity_rate: float,
+                               qwen_q2_df: pd.DataFrame | None = None,
+                               llama_q4_df: pd.DataFrame | None = None):
     """
     Cost-per-1k-output-tokens across self-hosted (BitNet / Qwen) and cloud
     API services.  Each self-hosted model contributes two bars:
@@ -1191,9 +1306,11 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
     """
     entries: list[tuple[str, float, str, str]] = []  # (label, cost, color, hatch)
     for name, df, color in [
-        ("Qwen2.5-1.5B Q8_0",   qwen_q8_df,    QWEN_Q8_COLOR),
-        ("Qwen2.5-1.5B Q4_K_M", qwen_q4_df, QWEN_Q4_COLOR),
-        ("BitNet b1.58 2B4T",   local_df,   BITNET_COLOR),
+        ("Llama-3.2-1B Q4_K_M",  llama_q4_df, LLAMA_Q4_COLOR),
+        ("Qwen2.5-1.5B Q8_0",    qwen_q8_df,  QWEN_Q8_COLOR),
+        ("Qwen2.5-1.5B Q4_K_M",  qwen_q4_df,  QWEN_Q4_COLOR),
+        ("Qwen2.5-1.5B Q2_K",    qwen_q2_df,  QWEN_Q2_COLOR),
+        ("BitNet b1.58 2B4T",    local_df,    BITNET_COLOR),
     ]:
         if df is None or df.empty:
             continue
@@ -1246,9 +1363,18 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
 
     from matplotlib.patches import Patch
     handles = []
-    have_bitnet = any(label.startswith("BitNet") for label, *_ in entries)
-    have_qwen_q8   = any(label.startswith("Qwen2.5-1.5B Q8_0") for label, *_ in entries)
-    have_q4     = any(label.startswith("Qwen2.5-1.5B Q4_K_M") for label, *_ in entries)
+    have_bitnet  = any(label.startswith("BitNet") for label, *_ in entries)
+    have_qwen_q8 = any(label.startswith("Qwen2.5-1.5B Q8_0") for label, *_ in entries)
+    have_q4      = any(label.startswith("Qwen2.5-1.5B Q4_K_M") for label, *_ in entries)
+    have_q2      = any(label.startswith("Qwen2.5-1.5B Q2_K") for label, *_ in entries)
+    have_llama   = any(label.startswith("Llama-3.2-1B") for label, *_ in entries)
+    if have_llama:
+        handles += [
+            Patch(facecolor=LLAMA_Q4_COLOR, hatch="///", edgecolor="#444444",
+                  label="Llama Q4_K_M (ours, AWS proxy)"),
+            Patch(facecolor=LLAMA_Q4_COLOR, edgecolor="#cccccc",
+                  label="Llama Q4_K_M (ours, local electricity)"),
+        ]
     if have_qwen_q8:
         handles += [
             Patch(facecolor=QWEN_Q8_COLOR, hatch="///", edgecolor="#444444",
@@ -1262,6 +1388,13 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
                   label="Qwen Q4_K_M (ours, AWS proxy)"),
             Patch(facecolor=QWEN_Q4_COLOR, edgecolor="#cccccc",
                   label="Qwen Q4_K_M (ours, local electricity)"),
+        ]
+    if have_q2:
+        handles += [
+            Patch(facecolor=QWEN_Q2_COLOR, hatch="///", edgecolor="#444444",
+                  label="Qwen Q2_K (ours, AWS proxy)"),
+            Patch(facecolor=QWEN_Q2_COLOR, edgecolor="#cccccc",
+                  label="Qwen Q2_K (ours, local electricity)"),
         ]
     if have_bitnet:
         handles += [
@@ -1327,11 +1460,13 @@ def _cloud_display_name(full_name: str) -> str:
 
 def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
                                    qwen_q8_acc: dict | None = None,
-                                   qwen_q4_acc: dict | None = None):
+                                   qwen_q4_acc: dict | None = None,
+                                   qwen_q2_acc: dict | None = None,
+                                   llama_q4_acc: dict | None = None):
     """
     Grouped-bar accuracy plot mirroring plot_accuracy(), but comparing our
-    locally-measured models (BitNet, Qwen Q8/Q4) against cloud subscription
-    APIs from CLOUD_API_PRICING.
+    locally-measured models (BitNet, Qwen Q8/Q4/Q2, Llama Q4) against cloud
+    subscription APIs from CLOUD_API_PRICING.
 
     Cloud values come from CLOUD_API_ACCURACY.  Most providers only publish
     MMLU, so non-MMLU bars for cloud rows are typically empty (rendered as 0
@@ -1344,12 +1479,18 @@ def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
 
     all_models: list[str] = []
     model_accs: dict[str, dict] = {}
+    if llama_q4_acc is not None:
+        label = "Llama-3.2-1B\nQ4_K_M (ours)"
+        all_models.append(label); model_accs[label] = llama_q4_acc
     if qwen_q8_acc is not None:
         label = "Qwen2.5-1.5B\nQ8_0 (ours)"
         all_models.append(label); model_accs[label] = qwen_q8_acc
     if qwen_q4_acc is not None:
         label = "Qwen2.5-1.5B\nQ4_K_M (ours)"
         all_models.append(label); model_accs[label] = qwen_q4_acc
+    if qwen_q2_acc is not None:
+        label = "Qwen2.5-1.5B\nQ2_K (ours)"
+        all_models.append(label); model_accs[label] = qwen_q2_acc
     label = "BitNet b1.58 2B4T\n(ours)"
     all_models.append(label); model_accs[label] = local_acc
 
@@ -1402,6 +1543,8 @@ def plot_cloud_cost_accuracy(comparison_df: pd.DataFrame, out_dir: Path):
     """
     QWEN_Q8_NAME = "Qwen2.5-1.5B-Instruct Q8_0"
     QWEN_Q4_NAME = "Qwen2.5-1.5B-Instruct Q4_K_M"
+    QWEN_Q2_NAME = "Qwen2.5-1.5B-Instruct Q2_K"
+    LLAMA_Q4_NAME = "Llama-3.2-1B-Instruct Q4_K_M"
     BITNET_NAME = "BitNet b1.58 2B4T"
 
     fig, ax = plt.subplots(figsize=(11, 7))
@@ -1423,6 +1566,12 @@ def plot_cloud_cost_accuracy(comparison_df: pd.DataFrame, out_dir: Path):
         elif model == QWEN_Q4_NAME:
             color, label = QWEN_Q4_COLOR, "Qwen2.5-1.5B Q4_K_M (ours)"
             ann, xy_offset = "Qwen Q4_K_M (ours)", (8, -22)
+        elif model == QWEN_Q2_NAME:
+            color, label = QWEN_Q2_COLOR, "Qwen2.5-1.5B Q2_K (ours)"
+            ann, xy_offset = "Qwen Q2_K (ours)", (8, -34)
+        elif model == LLAMA_Q4_NAME:
+            color, label = LLAMA_Q4_COLOR, "Llama-3.2-1B Q4_K_M (ours)"
+            ann, xy_offset = "Llama Q4_K_M (ours)", (-100, -10)
         else:
             continue
         ax.scatter(cost, mmlu, facecolors=color, edgecolors=color, marker="D",
@@ -1470,9 +1619,11 @@ def plot_mmlu_subject_heatmap(
     qwen_q8_full: dict | None,
     qwen_q4_full: dict | None,
     out_dir: Path,
+    qwen_q2_full: dict | None = None,
+    llama_q4_full: dict | None = None,
 ):
     """
-    Heatmap of MMLU per-subject accuracy for the three locally-measured models.
+    Heatmap of MMLU per-subject accuracy for the locally-measured models.
 
     Filtered to subjects with substantial cross-model spread (max - min across
     models >= SPREAD_THRESHOLD percentage points), sorted by spread descending
@@ -1485,8 +1636,10 @@ def plot_mmlu_subject_heatmap(
 
     models: list[tuple[str, dict]] = []
     for label, full in [
-        ("Qwen Q8_0",   qwen_q8_full),
-        ("Qwen Q4_K_M", qwen_q4_full),
+        ("Llama Q4_K_M", llama_q4_full),
+        ("Qwen Q8_0",    qwen_q8_full),
+        ("Qwen Q4_K_M",  qwen_q4_full),
+        ("Qwen Q2_K",    qwen_q2_full),
         ("BitNet 2B4T",  bitnet_full),
     ]:
         if full is not None and "mmlu" in full and "subjects" in full["mmlu"]:
@@ -1573,14 +1726,19 @@ def plot_accuracy_eval_cost(
     qwen_q8_full: dict | None,
     qwen_q4_full: dict | None,
     out_dir: Path,
+    qwen_q2_full: dict | None = None,
+    llama_q4_full: dict | None = None,
 ):
     """
     Total wall-clock time and energy consumed by the accuracy evaluation
     suite, broken down by benchmark task and model.
 
-    Two side-by-side panels:
-      (a) Wall-clock hours per task per model (stacked bar)
-      (b) Energy kWh per task per model (stacked bar)
+    Single panel of stacked horizontal bars (hours per task per model) with
+    a twin x-axis on top showing equivalent energy in kWh.  Inference is
+    CPU-bound at ~100% utilization, so average power is roughly constant
+    across models and energy ≈ hours × avg_power_kW — the twin axis is an
+    approximation, set from the run's measured kWh/hour ratio (per model
+    variance is typically a few percent).
 
     Useful for the reproducibility discussion: shows how expensive it is
     to replicate the full evaluation.  Skips silently if no accuracy JSON
@@ -1592,8 +1750,10 @@ def plot_accuracy_eval_cost(
 
     series: list[tuple[str, str, dict]] = []
     for label, color, full in [
-        ("Qwen Q8_0",   QWEN_Q8_COLOR, qwen_q8_full),
-        ("Qwen Q4_K_M", QWEN_Q4_COLOR, qwen_q4_full),
+        ("Llama Q4_K_M", LLAMA_Q4_COLOR, llama_q4_full),
+        ("Qwen Q8_0",    QWEN_Q8_COLOR,  qwen_q8_full),
+        ("Qwen Q4_K_M",  QWEN_Q4_COLOR,  qwen_q4_full),
+        ("Qwen Q2_K",    QWEN_Q2_COLOR,  qwen_q2_full),
         ("BitNet 2B4T",  BITNET_COLOR,   bitnet_full),
     ]:
         if full is None:
@@ -1606,12 +1766,12 @@ def plot_accuracy_eval_cost(
         print("Skipping accuracy eval cost plot: no elapsed_s data in accuracy JSONs.")
         return
 
-    fig, (ax_t, ax_e) = plt.subplots(1, 2, figsize=(14, 5))
-    x = np.arange(len(series))
-    width = 0.6
+    fig, ax = plt.subplots(figsize=(13, max(4, len(series) * 0.9 + 1.5)))
+    y = np.arange(len(series))
 
-    bottom_t = np.zeros(len(series))
-    bottom_e = np.zeros(len(series))
+    left_t = np.zeros(len(series))
+    total_hours = np.zeros(len(series))
+    total_kwh = np.zeros(len(series))
     for ti, (task, td, tc) in enumerate(zip(tasks, task_display, task_colors)):
         hours = []
         kwh = []
@@ -1621,35 +1781,46 @@ def plot_accuracy_eval_cost(
             hours.append(h / 3600.0 if h is not None else 0)
             e = info.get("energy_kwh")
             kwh.append(e if e is not None else 0)
-        ax_t.bar(x, hours, width, bottom=bottom_t, label=td, color=tc)
-        ax_e.bar(x, kwh,   width, bottom=bottom_e, label=td, color=tc)
-        bottom_t += hours
-        bottom_e += kwh
+        hours_arr = np.array(hours)
+        kwh_arr = np.array(kwh)
+        ax.barh(y, hours_arr, left=left_t, label=td, color=tc,
+                edgecolor="white", linewidth=0.5)
+        left_t += hours_arr
+        total_hours += hours_arr
+        total_kwh += kwh_arr
 
-    for ax, totals, fmt, ylabel, title_suffix in [
-        (ax_t, bottom_t, "{:.1f}h", "Wall-clock time (hours)", "Time"),
-        (ax_e, bottom_e, "{:.3f}", "Energy (kWh)", "Energy"),
-    ]:
-        ax.set_xticks(x)
-        ax.set_xticklabels([s[0] for s in series])
-        ax.set_ylabel(ylabel)
-        max_val = max(totals) if len(totals) else 1
-        ax.set_ylim(0, max_val * 1.15)
-        for xi, val in zip(x, totals):
-            ax.text(xi, val + max_val * 0.02, fmt.format(val),
-                    ha="center", fontsize=9, fontweight="bold")
-        panel_letter = "a" if ax is ax_t else "b"
-        ax.set_title(f"({panel_letter}) Evaluation {title_suffix}", loc="left")
-        ax.grid(axis="y", alpha=0.3)
+    ax.set_yticks(y)
+    ax.set_yticklabels([s[0] for s in series])
+    ax.invert_yaxis()
+    ax.set_xlabel("Wall-clock time (hours)")
+    max_h = float(max(total_hours)) if len(total_hours) else 1.0
+    ax.set_xlim(0, max_h * 1.18)
+    for yi, h, k in zip(y, total_hours, total_kwh):
+        ax.text(h + max_h * 0.015, yi, f"{h:.1f} h   ·   {k:.3f} kWh",
+                va="center", fontsize=9, fontweight="bold")
+    ax.grid(axis="x", alpha=0.3)
+    ax.legend(loc="lower right", fontsize=8, title="Benchmark")
 
-    ax_t.legend(loc="upper left", fontsize=8)
+    # Twin x-axis: avg kWh/hour ratio gives an approximate energy scale.
+    # CPU-bound inference ⇒ power ≈ constant, so this is close to exact in
+    # practice (per-model variance is typically a few percent).
+    valid = [(h, k) for h, k in zip(total_hours, total_kwh) if h > 0 and k > 0]
+    if valid:
+        kwh_per_hour = sum(k / h for h, k in valid) / len(valid)
+        ax_e = ax.secondary_xaxis(
+            "top",
+            functions=(lambda x: x * kwh_per_hour, lambda x: x / kwh_per_hour),
+        )
+        ax_e.set_xlabel(
+            f"Energy (kWh)  —  approx. via avg power ≈ {kwh_per_hour * 1000:.0f} W"
+        )
 
-    fig.suptitle(
+    ax.set_title(
         "Total Accuracy Evaluation Cost\n"
-        "(full 5-benchmark suite: ARC-Easy, ARC-Challenge, WinoGrande, HellaSwag, MMLU)",
-        fontsize=12,
+        "(stacked by benchmark — ARC-Easy / ARC-Challenge / WinoGrande / HellaSwag / MMLU)",
+        loc="left",
     )
-    fig.tight_layout(rect=[0, 0, 1, 0.90])
+    fig.tight_layout()
     path = out_dir / "accuracy_eval_cost.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -1669,8 +1840,10 @@ def main():
     qwen_q4_acc_full = load_accuracy_full(Path(args.qwen_q4_accuracy))
     qwen_q2_df = load_qwen(Path(args.qwen_q2_results))
     qwen_q2_acc = load_accuracy(Path(args.qwen_q2_accuracy))
+    qwen_q2_acc_full = load_accuracy_full(Path(args.qwen_q2_accuracy))
     llama_q4_df = load_qwen(Path(args.llama_q4_results))
     llama_q4_acc = load_accuracy(Path(args.llama_q4_accuracy))
+    llama_q4_acc_full = load_accuracy_full(Path(args.llama_q4_accuracy))
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     comparison_df = build_comparison_df(
@@ -1683,21 +1856,28 @@ def main():
     )
     write_comparison_csv(comparison_df, Path(args.csv))
 
-    plot_throughput(local_df, PLOTS_DIR, qwen_q8_df, qwen_q4_df)
+    plot_throughput(local_df, PLOTS_DIR, qwen_q8_df, qwen_q4_df,
+                    qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df)
     plot_thread_scaling(PLOTS_DIR)
     plot_cross_arch_throughput(PLOTS_DIR)
-    plot_memory(local_df, PLOTS_DIR, qwen_q8_df, qwen_q4_df)
-    plot_accuracy(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc)
+    plot_memory(local_df, PLOTS_DIR, qwen_q8_df, qwen_q4_df,
+                qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df)
+    plot_accuracy(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc,
+                  qwen_q2_acc=qwen_q2_acc, llama_q4_acc=llama_q4_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
     plot_energy_carbon(local_df, qwen_q8_df, PLOTS_DIR, qwen_q4_df,
-                       electricity_rate=args.electricity_rate)
+                       qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df)
     plot_cloud_cost_comparison(local_df, qwen_q8_df, qwen_q4_df, PLOTS_DIR,
-                                args.hardware_rate, args.electricity_rate)
+                               args.hardware_rate, args.electricity_rate,
+                               qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df)
     plot_memory_accuracy(comparison_df, PLOTS_DIR)
-    plot_cloud_accuracy_comparison(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc)
+    plot_cloud_accuracy_comparison(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc,
+                                   qwen_q2_acc=qwen_q2_acc, llama_q4_acc=llama_q4_acc)
     plot_cloud_cost_accuracy(comparison_df, PLOTS_DIR)
-    plot_mmlu_subject_heatmap(local_acc_full, qwen_q8_acc_full, qwen_q4_acc_full, PLOTS_DIR)
-    plot_accuracy_eval_cost(local_acc_full, qwen_q8_acc_full, qwen_q4_acc_full, PLOTS_DIR)
+    plot_mmlu_subject_heatmap(local_acc_full, qwen_q8_acc_full, qwen_q4_acc_full, PLOTS_DIR,
+                              qwen_q2_full=qwen_q2_acc_full, llama_q4_full=llama_q4_acc_full)
+    plot_accuracy_eval_cost(local_acc_full, qwen_q8_acc_full, qwen_q4_acc_full, PLOTS_DIR,
+                            qwen_q2_full=qwen_q2_acc_full, llama_q4_full=llama_q4_acc_full)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
 

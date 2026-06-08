@@ -971,9 +971,12 @@ define run_remote_benchmark
 	    docker run --rm \
 	        -e BITNET_DIR=/Models/BitNet \
 	        -e QWEN_DIR=/Models/Qwen \
+	        -e LLAMA_DIR=/Models/Llama \
 	        -e BITNET_BENCH_OUT=results/out/bitnet_step_metrics.csv \
 	        -e QWEN_Q8_BENCH_OUT=results/out/qwen_q8_step_metrics.csv \
 	        -e QWEN_Q4_BENCH_OUT=results/out/qwen_q4_step_metrics.csv \
+	        -e QWEN_Q2_BENCH_OUT=results/out/qwen_q2_step_metrics.csv \
+	        -e LLAMA_Q4_BENCH_OUT=results/out/llama_q4_step_metrics.csv \
 	        -v $(AWS_REMOTE_DIR)/out:/capstone/results/out \
 	        $1 make benchmark'
 	@mkdir -p results/$3
@@ -999,18 +1002,22 @@ aws-bootstrap-c7g:
 
 # Per-instance benchmark targets.  c5/c6a both use the x86 image
 # (shipped); c7g uses the arm image (built remotely via bootstrap).
+# All targets use THREADS=2 UBATCH=64 so the cross-arch sweep is
+# apples-to-apples with the 2-vCPU free-tier targets (c7i/t4g) and
+# with the local Windows reference's 2-thread point on its scaling
+# curve.  BitNet TL2 also requires UBATCH<=64 at 2 threads.
 aws-benchmark-c5: docker-build-x86
 	@test -n "$(C5_HOST)" || (echo "ERROR: C5_HOST must be set" && exit 1)
 	$(call ship_image,$(AWS_IMAGE_X86),$(C5_HOST))
-	$(call run_remote_benchmark,$(AWS_IMAGE_X86),$(C5_HOST),aws_c5_xlarge)
+	$(call run_remote_benchmark_2v,$(AWS_IMAGE_X86),$(C5_HOST),aws_c5_xlarge)
 
 aws-benchmark-c6a: docker-build-x86
 	@test -n "$(C6A_HOST)" || (echo "ERROR: C6A_HOST must be set" && exit 1)
 	$(call ship_image,$(AWS_IMAGE_X86),$(C6A_HOST))
-	$(call run_remote_benchmark,$(AWS_IMAGE_X86),$(C6A_HOST),aws_c6a_xlarge)
+	$(call run_remote_benchmark_2v,$(AWS_IMAGE_X86),$(C6A_HOST),aws_c6a_xlarge)
 
 aws-benchmark-c7g: aws-bootstrap-c7g
-	$(call run_remote_benchmark,$(AWS_IMAGE_ARM),$(C7G_HOST),aws_c7g_xlarge)
+	$(call run_remote_benchmark_2v,$(AWS_IMAGE_ARM),$(C7G_HOST),aws_c7g_xlarge)
 
 # Full sweep — runs sequentially.  Spot interruption tolerance: each
 # (n_prompt, n_gen) config writes one CSV row, so partial failures
@@ -1030,9 +1037,12 @@ define run_remote_benchmark_2v
 	    docker run --rm \
 	        -e BITNET_DIR=/Models/BitNet \
 	        -e QWEN_DIR=/Models/Qwen \
+	        -e LLAMA_DIR=/Models/Llama \
 	        -e BITNET_BENCH_OUT=results/out/bitnet_step_metrics.csv \
 	        -e QWEN_Q8_BENCH_OUT=results/out/qwen_q8_step_metrics.csv \
 	        -e QWEN_Q4_BENCH_OUT=results/out/qwen_q4_step_metrics.csv \
+	        -e QWEN_Q2_BENCH_OUT=results/out/qwen_q2_step_metrics.csv \
+	        -e LLAMA_Q4_BENCH_OUT=results/out/llama_q4_step_metrics.csv \
 	        -v $(AWS_REMOTE_DIR)/out:/capstone/results/out \
 	        $1 make benchmark THREADS=2 UBATCH=64'
 	@mkdir -p results/$3
@@ -1040,12 +1050,21 @@ define run_remote_benchmark_2v
 	@echo "==> $2: results landed in results/$3/"
 endef
 
-aws-benchmark-c7i:
+aws-benchmark-c7i: docker-build-x86
 	@test -n "$(C7I_HOST)" || (echo "ERROR: C7I_HOST must be set" && exit 1)
+	$(call ship_image,$(AWS_IMAGE_X86),$(C7I_HOST))
 	$(call run_remote_benchmark_2v,$(AWS_IMAGE_X86),$(C7I_HOST),aws_c7i_flex_large)
 
 aws-bootstrap-t4g:
 	@test -n "$(T4G_HOST)" || (echo "ERROR: T4G_HOST must be set" && exit 1)
+	@echo "==> Adding 4 GB swap on $(T4G_HOST) (t4g.small only has 2 GB RAM; BitNet build OOMs without it)"
+	$(AWS_SSH) $(AWS_USER)@$(T4G_HOST) '\
+	    if ! sudo swapon --show | grep -q /swapfile; then \
+	        sudo fallocate -l 4G /swapfile && \
+	        sudo chmod 600 /swapfile && \
+	        sudo mkswap /swapfile && \
+	        sudo swapon /swapfile; \
+	    fi'
 	@echo "==> Syncing repo to $(T4G_HOST):$(AWS_REMOTE_DIR)/repo"
 	$(AWS_SSH) $(AWS_USER)@$(T4G_HOST) 'mkdir -p $(AWS_REMOTE_DIR)/repo'
 	tar czf - --exclude='.git' --exclude='.venv' --exclude='results' \
