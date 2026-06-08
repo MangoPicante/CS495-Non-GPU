@@ -149,7 +149,7 @@ make eval-mmlu-qwen-q2
 make eval-mmlu-llama-q4
 # ...see make help for the full list
 
-# Regenerate the comparison table and all ~23 plots (incl. cloud comparison)
+# Regenerate the comparison table and all ~13 plots (incl. cloud comparison)
 make plots                 # → results/comparison_table.csv + results/plots/*.png
                            # Plots include cloud_cost_comparison.png,
                            # cloud_accuracy_comparison.png, and

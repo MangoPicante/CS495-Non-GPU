@@ -1163,7 +1163,7 @@ def _accuracy_scatter(
 
 
 def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
-    """Cost vs accuracy: mean-of-5 plot plus one plot per task."""
+    """Cost vs mean accuracy (one plot, no per-task variants)."""
     x_label = f"Cost per 1,000 tokens (USD, c5.xlarge @ ${hardware_rate:.3f}/hr)"
     _accuracy_scatter(
         df, out_dir,
@@ -1175,16 +1175,6 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
               "hollow ○ = paper,  filled ♦ = ours)",
         filename="cost_accuracy.png",
     )
-    for task, task_label in TASK_LABELS.items():
-        _accuracy_scatter(
-            df, out_dir,
-            x_col="cost_per_1k_tokens", y_metric=task,
-            x_label=x_label,
-            y_label=f"{task_label} Accuracy (%)",
-            title=f"Cost–{task_label} Trade-off: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
-                  f"(hollow ○ = paper target,  filled ♦ = our measurement)",
-            filename=f"{task}_cost_accuracy.png",
-        )
 
 
 def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
@@ -1420,7 +1410,7 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
 
 def plot_memory_accuracy(df: pd.DataFrame, out_dir: Path):
     """
-    Memory vs accuracy: mean-of-5 plot plus one plot per task.
+    Memory vs mean accuracy (one plot, no per-task variants).
 
     Lower-left is more efficient (less memory per accuracy point); BitNet b1.58
     typically sits in a corner the FP16 baselines can't reach.  Same hollow-vs-
@@ -1437,16 +1427,6 @@ def plot_memory_accuracy(df: pd.DataFrame, out_dir: Path):
         filename="memory_accuracy.png",
         legend_loc="lower right",
     )
-    for task, task_label in TASK_LABELS.items():
-        _accuracy_scatter(
-            df, out_dir,
-            x_col="peak_rss_mb", y_metric=task,
-            x_label="Peak RSS (MB) — lower is better",
-            y_label=f"{task_label} Accuracy (%)",
-            title=f"Memory–{task_label}: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
-                  f"(hollow ○ = paper target,  filled ♦ = our measurement)",
-            filename=f"{task}_memory_accuracy.png",
-        )
 
 
 def _cloud_display_name(full_name: str) -> str:

@@ -320,9 +320,7 @@ FP16 paper baselines (`OTHER_BASELINES` = LLaMA 3.2 1B; `BITNET_PAPER`;
    - `cost_accuracy.png` — cost vs **mean of 5 benchmarks** (hollow ○ =
      paper, filled ♦ = ours).  Dotted connectors visualize the quant chain
      (Qwen FP16 → Q8 → Q4 → Q2 ours) and the Llama FP16 → Q4 ours pairing.
-   - `{task}_cost_accuracy.png` for each of `arc_easy, arc_challenge, winogrande, hellaswag, mmlu`.
    - `memory_accuracy.png` — memory vs **mean of 5 benchmarks**.
-   - `{task}_memory_accuracy.png` per task.
    - `energy_carbon_comparison.png` — **single panel**: Wh per 1k tokens on
      the bottom x-axis, gCO₂ per 1k tokens on a top secondary x-axis (exact
      relabeling via the run's measured grid intensity).  USD-electricity

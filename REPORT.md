@@ -234,9 +234,9 @@ Within the "ours" cluster:
   specifically need Q8's near-FP16 fidelity on knowledge tasks (MMLU,
   where it edges out Q4 by ~1pt).
 
-Per-task variants are in `results/plots/{task}_cost_accuracy.png`. MMLU
-is the only task where Qwen2.5 1.5B (paper FP16) is competitive on the
-accuracy axis.
+MMLU is the only task where Qwen2.5 1.5B (paper FP16) is competitive on
+the accuracy axis — see `cloud_cost_accuracy.png` for the MMLU-specific
+view that also overlays the cloud APIs.
 
 ### 3.6 Memory–Accuracy Pareto
 
