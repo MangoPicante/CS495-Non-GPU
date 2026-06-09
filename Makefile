@@ -3,6 +3,14 @@ POETRY     := poetry
 THREADS    ?= 4
 LIMIT      ?= 500
 
+# Accuracy evals run at 2 threads / ubatch 64 by default — matches the
+# AWS Free Tier (c7i-flex.large, 2 vCPUs) condition so accuracy numbers
+# are apples-to-apples with the cross-arch throughput sweep, and BitNet's
+# TL2 kernel requires ubatch <=64 at threads=2.  Override with
+# EVAL_THREADS / EVAL_UBATCH for one-off changes.
+EVAL_THREADS ?= 2
+EVAL_UBATCH  ?= 64
+
 # vswhere.exe ships with every VS 2017+ install at this fixed location.
 # It is used by check-deps to verify the ClangCL VS components are present.
 VSWHERE := C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe
@@ -480,7 +488,8 @@ eval-arc-easy-bitnet:
 		--task arc_easy \
 		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--start-server
 
@@ -489,7 +498,8 @@ eval-arc-easy-qwen-q8:
 		--task arc_easy \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q8_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q8_ACC_OUT) \
 		--start-server
@@ -499,7 +509,8 @@ eval-arc-easy-qwen-q4:
 		--task arc_easy \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
@@ -509,7 +520,8 @@ eval-arc-easy-qwen-q2:
 		--task arc_easy \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q2_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q2_ACC_OUT) \
 		--start-server
@@ -519,7 +531,8 @@ eval-arc-easy-llama-q4:
 		--task arc_easy \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(LLAMA_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(LLAMA_Q4_ACC_OUT) \
 		--start-server
@@ -531,7 +544,8 @@ eval-arc-challenge-bitnet:
 		--task arc_challenge \
 		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--start-server
 
@@ -540,7 +554,8 @@ eval-arc-challenge-qwen-q8:
 		--task arc_challenge \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q8_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q8_ACC_OUT) \
 		--start-server
@@ -550,7 +565,8 @@ eval-arc-challenge-qwen-q4:
 		--task arc_challenge \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
@@ -560,7 +576,8 @@ eval-arc-challenge-qwen-q2:
 		--task arc_challenge \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q2_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q2_ACC_OUT) \
 		--start-server
@@ -570,7 +587,8 @@ eval-arc-challenge-llama-q4:
 		--task arc_challenge \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(LLAMA_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(LLAMA_Q4_ACC_OUT) \
 		--start-server
@@ -583,7 +601,8 @@ eval-mmlu-bitnet:
 		--num-fewshot 5 \
 		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--start-server
 
@@ -593,7 +612,8 @@ eval-mmlu-qwen-q8:
 		--num-fewshot 5 \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q8_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q8_ACC_OUT) \
 		--start-server
@@ -604,7 +624,8 @@ eval-mmlu-qwen-q4:
 		--num-fewshot 5 \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
@@ -615,7 +636,8 @@ eval-mmlu-qwen-q2:
 		--num-fewshot 5 \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q2_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q2_ACC_OUT) \
 		--start-server
@@ -626,7 +648,8 @@ eval-mmlu-llama-q4:
 		--num-fewshot 5 \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(LLAMA_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(LLAMA_Q4_ACC_OUT) \
 		--start-server
@@ -638,7 +661,8 @@ eval-winogrande-bitnet:
 		--task winogrande \
 		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--start-server
 
@@ -647,7 +671,8 @@ eval-winogrande-qwen-q8:
 		--task winogrande \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q8_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q8_ACC_OUT) \
 		--start-server
@@ -657,7 +682,8 @@ eval-winogrande-qwen-q4:
 		--task winogrande \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
@@ -667,7 +693,8 @@ eval-winogrande-qwen-q2:
 		--task winogrande \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q2_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q2_ACC_OUT) \
 		--start-server
@@ -677,7 +704,8 @@ eval-winogrande-llama-q4:
 		--task winogrande \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(LLAMA_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(LLAMA_Q4_ACC_OUT) \
 		--start-server
@@ -689,7 +717,8 @@ eval-hellaswag-bitnet:
 		--task hellaswag \
 		--llama-dir $(BITNET_DIR) \
 		--model $(MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--start-server
 
@@ -698,7 +727,8 @@ eval-hellaswag-qwen-q8:
 		--task hellaswag \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q8_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q8_ACC_OUT) \
 		--start-server
@@ -708,7 +738,8 @@ eval-hellaswag-qwen-q4:
 		--task hellaswag \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q4_ACC_OUT) \
 		--start-server
@@ -718,7 +749,8 @@ eval-hellaswag-qwen-q2:
 		--task hellaswag \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(QWEN_Q2_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(QWEN_Q2_ACC_OUT) \
 		--start-server
@@ -728,7 +760,8 @@ eval-hellaswag-llama-q4:
 		--task hellaswag \
 		--llama-dir $(QWEN_LLAMACPP_DIR) \
 		--model $(LLAMA_Q4_MODEL) \
-		--threads $(THREADS) \
+		--threads $(EVAL_THREADS) \
+		--ubatch $(EVAL_UBATCH) \
 		--limit $(LIMIT) \
 		--out $(LLAMA_Q4_ACC_OUT) \
 		--start-server

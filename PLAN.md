@@ -218,8 +218,18 @@ make eval-accuracy            # All five models, all 5 tasks
 
 Each target uses `--start-server` so `eval_accuracy.py` brings up
 `llama-server`, runs the eval, and shuts the server down.  Override
-`LIMIT=N` to sample `N` items per task (default 500); use `LIMIT=0` for the
-full split.
+`LIMIT=N` to sample `N` items per task (default 500); use `LIMIT=0` for
+the full split.
+
+**Eval thread/ubatch settings.** All accuracy evals run at
+`EVAL_THREADS=2 EVAL_UBATCH=64` by default — matches the AWS Free Tier
+(c7i-flex.large, 2 vCPUs) condition so accuracy numbers are
+apples-to-apples with the cross-arch throughput sweep, and BitNet's TL2
+kernel requires ubatch ≤ 64 at 2 threads.  Override per-invocation with
+`make eval-accuracy EVAL_THREADS=4 EVAL_UBATCH=128` if you want the
+4-thread / wider-batch path instead.  Benchmarks (`make benchmark*`)
+remain on `THREADS=4 UBATCH=128` — those are separate Makefile
+variables.
 
 ### 6. Plots and comparison table
 

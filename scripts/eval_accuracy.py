@@ -58,7 +58,8 @@ def _find_server_bin(llama_dir: Path) -> Path:
     raise FileNotFoundError(f"llama-server not found in {llama_dir}/build")
 
 
-def _start_server(llama_dir: Path, model: Path, threads: int, port: int, ctx: int = 4096):
+def _start_server(llama_dir: Path, model: Path, threads: int, port: int,
+                  ubatch: int = 128, ctx: int = 4096):
     global _server_proc
     if _server_proc is not None:
         _server_proc.terminate()
@@ -68,7 +69,7 @@ def _start_server(llama_dir: Path, model: Path, threads: int, port: int, ctx: in
             _server_proc.kill()
     bin_path = _find_server_bin(llama_dir)
     cmd = [str(bin_path), "-m", str(model), "-c", str(ctx), "-t", str(threads),
-           "-ub", "128",  # conservative default; BitNet TL2 kernels require <=128
+           "-ub", str(ubatch),
            "-ngl", "0", "--host", "127.0.0.1", "--port", str(port), "-cb"]
     _server_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}/health"
@@ -1008,7 +1009,12 @@ def main():
                         help="Start and manage llama-server automatically")
     parser.add_argument("--llama-dir", type=Path, default=DEFAULT_LLAMA_DIR)
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
-    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--threads", type=int, default=2)
+    parser.add_argument("--ubatch", type=int, default=64,
+                        help="llama-server -ub (micro-batch) size. BitNet's TL2 "
+                             "kernel requires <=64 at threads=2; upstream Qwen "
+                             "tolerates higher. Default 64 is safe across all "
+                             "models in this project at threads=2.")
     parser.add_argument("--no-energy", action="store_true",
                         help="Skip CodeCarbon energy tracking (faster, no internet needed)")
     parser.add_argument("--paper-targets",
@@ -1029,7 +1035,7 @@ def main():
     if args.start_server:
         global _server_args
         _server_args = dict(llama_dir=args.llama_dir, model=args.model,
-                            threads=args.threads, port=port)
+                            threads=args.threads, port=port, ubatch=args.ubatch)
         print(f"Starting llama-server on port {port}...")
         if not _start_server(**_server_args):
             print("ERROR: Server failed to start.")
