@@ -27,6 +27,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import platform
 import subprocess
 import tempfile
@@ -551,6 +552,43 @@ def _load_task_checkpoint(out: Path | None, task: str) -> dict:
     return {}
 
 
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _is_task_complete(out: Path | None, task: str, max_subjects: int | None = None) -> bool:
+    """True if `out` already has a finished result for `task`.
+
+    "Finished" means: the task key exists, has total > 0, and is not a mid-run
+    checkpoint (the presence of `n_processed` flags WinoGrande/HellaSwag runs
+    that crashed before completing).  For MMLU, every expected subject must be
+    present with total > 0.
+
+    Does not compare against the current --limit: bumping LIMIT to get more
+    samples is the default mode (don't pass --skip-completed).  --skip-completed
+    is for "I already ran this, don't redo it."
+    """
+    if not out or not out.exists():
+        return False
+    try:
+        with open(out) as f:
+            existing = json.load(f).get(task, {})
+    except Exception:
+        return False
+    if not existing or existing.get("total", 0) <= 0:
+        return False
+    if "n_processed" in existing:
+        return False
+    if task == "mmlu":
+        subjects = existing.get("subjects", {})
+        expected = MMLU_SUBJECTS[:max_subjects] if max_subjects else MMLU_SUBJECTS
+        for subj in expected:
+            r = subjects.get(subj)
+            if not r or r.get("total", 0) <= 0:
+                return False
+    return True
+
+
 def eval_winogrande(ds, server: str, out: Path | None = None) -> dict:
     """
     Partial-context scoring (lm-eval-harness methodology):
@@ -1017,6 +1055,10 @@ def main():
                              "models in this project at threads=2.")
     parser.add_argument("--no-energy", action="store_true",
                         help="Skip CodeCarbon energy tracking (faster, no internet needed)")
+    parser.add_argument("--skip-completed", action="store_true",
+                        default=_env_truthy("SKIP_COMPLETED"),
+                        help="Skip any task whose result is already complete in "
+                             "--out (also enabled by SKIP_COMPLETED=1 in the env)")
     parser.add_argument("--paper-targets",
                         choices=["both", "auto", "bitnet", "qwen", "none"],
                         default="both",
@@ -1030,29 +1072,42 @@ def main():
     port = int(args.server.split(":")[-1])
     tasks = TASKS if args.task == "all" else [args.task]
 
-    prefetch_all_datasets(tasks, args.limit, max_subjects=args.max_subjects)
-
-    if args.start_server:
-        global _server_args
-        _server_args = dict(llama_dir=args.llama_dir, model=args.model,
-                            threads=args.threads, port=port, ubatch=args.ubatch)
-        print(f"Starting llama-server on port {port}...")
-        if not _start_server(**_server_args):
-            print("ERROR: Server failed to start.")
-            return
-        print("Server ready.")
-    elif not check_server(args.server):
-        print(f"ERROR: No server at {args.server}. Pass --start-server or start it manually.")
-        return
-
     all_results = {}
+    tasks_to_run = []
     for task in tasks:
-        fewshot = args.num_fewshot if task == "mmlu" else 0
-        all_results[task] = run_task(task, args.server, fewshot, args.limit,
-                                     max_subjects=args.max_subjects if task == "mmlu" else None,
-                                     out=args.out, verbose=args.verbose,
-                                     track_energy=not args.no_energy,
-                                     paper_targets=paper_targets)
+        if args.skip_completed and _is_task_complete(args.out, task,
+                                                    max_subjects=args.max_subjects):
+            print(f"[skip-completed] {task} already complete in {args.out}", flush=True)
+            with open(args.out) as f:
+                all_results[task] = json.load(f).get(task, {})
+        else:
+            tasks_to_run.append(task)
+
+    if not tasks_to_run:
+        print("All requested tasks already complete; skipping prefetch and server startup.")
+    else:
+        prefetch_all_datasets(tasks_to_run, args.limit, max_subjects=args.max_subjects)
+
+        if args.start_server:
+            global _server_args
+            _server_args = dict(llama_dir=args.llama_dir, model=args.model,
+                                threads=args.threads, port=port, ubatch=args.ubatch)
+            print(f"Starting llama-server on port {port}...")
+            if not _start_server(**_server_args):
+                print("ERROR: Server failed to start.")
+                return
+            print("Server ready.")
+        elif not check_server(args.server):
+            print(f"ERROR: No server at {args.server}. Pass --start-server or start it manually.")
+            return
+
+        for task in tasks_to_run:
+            fewshot = args.num_fewshot if task == "mmlu" else 0
+            all_results[task] = run_task(task, args.server, fewshot, args.limit,
+                                         max_subjects=args.max_subjects if task == "mmlu" else None,
+                                         out=args.out, verbose=args.verbose,
+                                         track_energy=not args.no_energy,
+                                         paper_targets=paper_targets)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     existing = {}

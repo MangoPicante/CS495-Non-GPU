@@ -123,14 +123,16 @@ RUN cd ${QWEN_DIR} && \
         qwen2.5-1.5b-instruct-q2_k.gguf \
         --local-dir .
 
-# Llama-3.2-1B-Instruct Q4_K_M — second model family (community quant
-# from bartowski; Meta does not ship GGUFs).  Reuses the upstream
-# llama.cpp build from §3 — no separate build needed.
-ENV LLAMA_DIR=/Models/Llama
-RUN mkdir -p ${LLAMA_DIR} && \
-    cd ${LLAMA_DIR} && \
-    huggingface-cli download bartowski/Llama-3.2-1B-Instruct-GGUF \
-        Llama-3.2-1B-Instruct-Q4_K_M.gguf \
+# Gemma 2 2B Instruct — second model family at Q8_0 / Q4_K_M / Q2_K
+# (community quants from bartowski; Google does not ship GGUFs).
+# Reuses the upstream llama.cpp build from §3 — no separate build needed.
+ENV GEMMA_DIR=/Models/Gemma
+RUN mkdir -p ${GEMMA_DIR} && \
+    cd ${GEMMA_DIR} && \
+    huggingface-cli download bartowski/gemma-2-2b-it-GGUF \
+        gemma-2-2b-it-Q8_0.gguf \
+        gemma-2-2b-it-Q4_K_M.gguf \
+        gemma-2-2b-it-Q2_K.gguf \
         --local-dir .
 
 # ── 4. Install project Python deps via Poetry ────────────────────────────────

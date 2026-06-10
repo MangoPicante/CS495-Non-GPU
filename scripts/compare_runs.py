@@ -47,8 +47,12 @@ DEFAULT_QWEN_Q4_CSV = Path(__file__).parent.parent / "results" / "qwen_q4_step_m
 DEFAULT_QWEN_Q4_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen_q4.json"
 DEFAULT_QWEN_Q2_CSV = Path(__file__).parent.parent / "results" / "qwen_q2_step_metrics.csv"
 DEFAULT_QWEN_Q2_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_qwen_q2.json"
-DEFAULT_LLAMA_Q4_CSV = Path(__file__).parent.parent / "results" / "llama_q4_step_metrics.csv"
-DEFAULT_LLAMA_Q4_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_llama_q4.json"
+DEFAULT_GEMMA_Q8_CSV = Path(__file__).parent.parent / "results" / "gemma_q8_step_metrics.csv"
+DEFAULT_GEMMA_Q8_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_gemma_q8.json"
+DEFAULT_GEMMA_Q4_CSV = Path(__file__).parent.parent / "results" / "gemma_q4_step_metrics.csv"
+DEFAULT_GEMMA_Q4_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_gemma_q4.json"
+DEFAULT_GEMMA_Q2_CSV = Path(__file__).parent.parent / "results" / "gemma_q2_step_metrics.csv"
+DEFAULT_GEMMA_Q2_ACCURACY_JSON = Path(__file__).parent.parent / "results" / "accuracy_results_gemma_q2.json"
 
 # AWS c5.xlarge on-demand, us-east-1 (4 vCPUs — matches 4-thread benchmark condition)
 # Source: https://instances.vantage.sh/aws/ec2/c5.xlarge (re-verified 2026-05-24:
@@ -80,18 +84,15 @@ DEFAULT_ELECTRICITY_RATE = 0.16
 # Only families for which we also evaluate a locally-measured PTQ variant
 # are retained — keeps every FP16 paper row paired to one of our "ours"
 # rows for a clean before/after comparison:
-#   LLaMA 3.2 1B  paper FP16  ↔  Llama-3.2-1B-Instruct Q4_K_M (ours)
 #   Qwen2.5 1.5B  paper FP16  ↔  Qwen2.5-1.5B-Instruct Q8_0/Q4_K_M/Q2_K (ours)
 # Qwen2.5 1.5B is broken out separately (QWEN_PAPER below).
-# Gemma-3 1B, SmolLM2 1.7B, MiniCPM 2B removed — no PTQ counterpart in this
-# study, so their rows were FP16-only and unactionable.
-OTHER_BASELINES = {
-    "LLaMA 3.2 1B": {
-        "throughput_tokens_s": 4.5,  "peak_rss_mb": 2600,
-        "arc_easy": 69.87, "arc_challenge": 41.04,
-        "winogrande": 60.77, "hellaswag": 61.05, "mmlu": 42.12,
-    },
-}
+# Gemma-2 2B does not appear in arXiv:2504.12285 Table 1, so the three
+# Gemma "ours" measurements (Q8_0/Q4_K_M/Q2_K) currently have no paired
+# FP16 paper baseline.  Add a GEMMA_PAPER block here once you've pulled
+# numbers from the Gemma 2 technical report (arXiv:2408.00118).
+# Gemma-3 1B, LLaMA 3.2 1B, SmolLM2 1.7B, MiniCPM 2B removed — no PTQ
+# counterpart in this study, so their rows were FP16-only and unactionable.
+OTHER_BASELINES = {}
 
 # BitNet b1.58 2B4T numbers as reported in arXiv:2504.12285
 BITNET_PAPER = {
@@ -115,13 +116,17 @@ QWEN_PAPER = {
 #   Qwen Q8_0 (ours)       → green
 #   Qwen Q4_K_M (ours)     → purple
 #   Qwen Q2_K (ours)       → red    (deepest Qwen quantization)
-#   Llama Q4_K_M (ours)    → brown  (separate model family from Qwen)
+#   Gemma Q8_0 (ours)      → brown      (separate model family from Qwen)
+#   Gemma Q4_K_M (ours)    → light teal (Gemma's mid quantization)
+#   Gemma Q2_K (ours)      → dark teal  (deepest Gemma quantization)
 OTHER_COLOR     = "#4C72B0"
 BITNET_COLOR    = "#DD8452"
 QWEN_Q8_COLOR   = "#55A868"
 QWEN_Q4_COLOR   = "#8172B2"
 QWEN_Q2_COLOR   = "#C44E52"
-LLAMA_Q4_COLOR  = "#937860"
+GEMMA_Q8_COLOR  = "#937860"
+GEMMA_Q4_COLOR  = "#64B5CD"
+GEMMA_Q2_COLOR  = "#2C7873"
 CLOUD_API_COLOR = "#7F7F7F"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -263,8 +268,12 @@ def parse_args():
     p.add_argument("--qwen-q4-accuracy", default=str(DEFAULT_QWEN_Q4_ACCURACY_JSON))
     p.add_argument("--qwen-q2-results", default=str(DEFAULT_QWEN_Q2_CSV))
     p.add_argument("--qwen-q2-accuracy", default=str(DEFAULT_QWEN_Q2_ACCURACY_JSON))
-    p.add_argument("--llama-q4-results", default=str(DEFAULT_LLAMA_Q4_CSV))
-    p.add_argument("--llama-q4-accuracy", default=str(DEFAULT_LLAMA_Q4_ACCURACY_JSON))
+    p.add_argument("--gemma-q8-results", default=str(DEFAULT_GEMMA_Q8_CSV))
+    p.add_argument("--gemma-q8-accuracy", default=str(DEFAULT_GEMMA_Q8_ACCURACY_JSON))
+    p.add_argument("--gemma-q4-results", default=str(DEFAULT_GEMMA_Q4_CSV))
+    p.add_argument("--gemma-q4-accuracy", default=str(DEFAULT_GEMMA_Q4_ACCURACY_JSON))
+    p.add_argument("--gemma-q2-results", default=str(DEFAULT_GEMMA_Q2_CSV))
+    p.add_argument("--gemma-q2-accuracy", default=str(DEFAULT_GEMMA_Q2_ACCURACY_JSON))
     p.add_argument("--csv", default=str(DEFAULT_COMPARISON_CSV))
     p.add_argument(
         "--hardware-rate",
@@ -380,8 +389,12 @@ def build_comparison_df(
     qwen_q4_acc: dict | None = None,
     qwen_q2_df: pd.DataFrame | None = None,
     qwen_q2_acc: dict | None = None,
-    llama_q4_df: pd.DataFrame | None = None,
-    llama_q4_acc: dict | None = None,
+    gemma_q8_df: pd.DataFrame | None = None,
+    gemma_q8_acc: dict | None = None,
+    gemma_q4_df: pd.DataFrame | None = None,
+    gemma_q4_acc: dict | None = None,
+    gemma_q2_df: pd.DataFrame | None = None,
+    gemma_q2_acc: dict | None = None,
     electricity_rate: float = DEFAULT_ELECTRICITY_RATE,
 ) -> pd.DataFrame:
     ACC_FIELDS = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
@@ -459,19 +472,49 @@ def build_comparison_df(
             **{f: (round(q2_acc[f], 2) if q2_acc.get(f) is not None else "") for f in ACC_FIELDS},
         })
 
-    llama_acc = llama_q4_acc or {}
-    if llama_q4_df is not None or any(llama_acc.get(f) is not None for f in ACC_FIELDS):
-        llama_tps, llama_rss = _bench_row(llama_q4_df) if llama_q4_df is not None else (None, None)
-        llama_cost = round(cost_per_1k(llama_tps, hardware_rate), 6) if llama_tps else ""
-        llama_e_cost = energy_cost_per_1k(llama_q4_df, electricity_rate)
+    gemma_q8_acc_d = gemma_q8_acc or {}
+    if gemma_q8_df is not None or any(gemma_q8_acc_d.get(f) is not None for f in ACC_FIELDS):
+        g8_tps, g8_rss = _bench_row(gemma_q8_df) if gemma_q8_df is not None else (None, None)
+        g8_cost = round(cost_per_1k(g8_tps, hardware_rate), 6) if g8_tps else ""
+        g8_e_cost = energy_cost_per_1k(gemma_q8_df, electricity_rate)
         rows.append({
-            "model": "Llama-3.2-1B-Instruct Q4_K_M",
+            "model": "Gemma-2-2B-it Q8_0",
             "source": "ours",
-            "throughput_tokens_s": round(llama_tps, 2) if llama_tps is not None else "",
-            "peak_rss_mb": round(llama_rss, 0) if llama_rss is not None else "",
-            "cost_per_1k_tokens": llama_cost,
-            "energy_cost_per_1k_tokens": round(llama_e_cost, 6) if llama_e_cost is not None else "",
-            **{f: (round(llama_acc[f], 2) if llama_acc.get(f) is not None else "") for f in ACC_FIELDS},
+            "throughput_tokens_s": round(g8_tps, 2) if g8_tps is not None else "",
+            "peak_rss_mb": round(g8_rss, 0) if g8_rss is not None else "",
+            "cost_per_1k_tokens": g8_cost,
+            "energy_cost_per_1k_tokens": round(g8_e_cost, 6) if g8_e_cost is not None else "",
+            **{f: (round(gemma_q8_acc_d[f], 2) if gemma_q8_acc_d.get(f) is not None else "") for f in ACC_FIELDS},
+        })
+
+    gemma_q4_acc_d = gemma_q4_acc or {}
+    if gemma_q4_df is not None or any(gemma_q4_acc_d.get(f) is not None for f in ACC_FIELDS):
+        g4_tps, g4_rss = _bench_row(gemma_q4_df) if gemma_q4_df is not None else (None, None)
+        g4_cost = round(cost_per_1k(g4_tps, hardware_rate), 6) if g4_tps else ""
+        g4_e_cost = energy_cost_per_1k(gemma_q4_df, electricity_rate)
+        rows.append({
+            "model": "Gemma-2-2B-it Q4_K_M",
+            "source": "ours",
+            "throughput_tokens_s": round(g4_tps, 2) if g4_tps is not None else "",
+            "peak_rss_mb": round(g4_rss, 0) if g4_rss is not None else "",
+            "cost_per_1k_tokens": g4_cost,
+            "energy_cost_per_1k_tokens": round(g4_e_cost, 6) if g4_e_cost is not None else "",
+            **{f: (round(gemma_q4_acc_d[f], 2) if gemma_q4_acc_d.get(f) is not None else "") for f in ACC_FIELDS},
+        })
+
+    gemma_q2_acc_d = gemma_q2_acc or {}
+    if gemma_q2_df is not None or any(gemma_q2_acc_d.get(f) is not None for f in ACC_FIELDS):
+        g2_tps, g2_rss = _bench_row(gemma_q2_df) if gemma_q2_df is not None else (None, None)
+        g2_cost = round(cost_per_1k(g2_tps, hardware_rate), 6) if g2_tps else ""
+        g2_e_cost = energy_cost_per_1k(gemma_q2_df, electricity_rate)
+        rows.append({
+            "model": "Gemma-2-2B-it Q2_K",
+            "source": "ours",
+            "throughput_tokens_s": round(g2_tps, 2) if g2_tps is not None else "",
+            "peak_rss_mb": round(g2_rss, 0) if g2_rss is not None else "",
+            "cost_per_1k_tokens": g2_cost,
+            "energy_cost_per_1k_tokens": round(g2_e_cost, 6) if g2_e_cost is not None else "",
+            **{f: (round(gemma_q2_acc_d[f], 2) if gemma_q2_acc_d.get(f) is not None else "") for f in ACC_FIELDS},
         })
 
     bitnet_tps, bitnet_rss = _bench_row(local_df)
@@ -510,15 +553,17 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
                 qwen_q4_df: pd.DataFrame | None,
                 metric: str,
                 qwen_q2_df: pd.DataFrame | None = None,
-                llama_q4_df: pd.DataFrame | None = None,
+                gemma_q8_df: pd.DataFrame | None = None,
+                gemma_q4_df: pd.DataFrame | None = None,
+                gemma_q2_df: pd.DataFrame | None = None,
                 ) -> tuple[list[str], list[float], list[str], list[str]]:
     """
     Build the (labels, values, colors, hatches) tuple for a horizontal bar chart.
 
     Order pairs each FP16 paper row with its quantized counterpart so the
     paper→ours delta is visually adjacent:
-      LLaMA 3.2 1B paper → Llama Q4 ours →
       Qwen 1.5B paper → Qwen Q8 → Q4 → Q2 ours →
+      Gemma 2 2B Q8 → Q4 → Q2 ours (no paper baseline) →
       BitNet ours → BitNet paper.
 
     Each "ours" row is conditional on local data existing.  `metric` selects
@@ -533,19 +578,11 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
     colors: list[str] = []
     hatches: list[str] = []
 
-    # LLaMA 3.2 1B (paper FP16) — paired with Llama Q4 (ours)
+    # Other FP16 paper baselines (currently empty — kept for forward-compat).
     for m, paper in OTHER_BASELINES.items():
         labels.append(m)
         values.append(paper[metric_col])
         colors.append(OTHER_COLOR)
-        hatches.append("")
-
-    llama_tps, llama_rss = _bench_row(llama_q4_df) if llama_q4_df is not None else (None, None)
-    llama_val = llama_tps if metric_col == "throughput_tokens_s" else llama_rss
-    if llama_val is not None:
-        labels.append("Llama-3.2-1B-Instruct Q4_K_M (ours)")
-        values.append(llama_val)
-        colors.append(LLAMA_Q4_COLOR)
         hatches.append("")
 
     # Qwen 1.5B FP16 paper → Q8 → Q4 → Q2 (ours).  Qwen FP16 paper is rendered
@@ -580,6 +617,32 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         colors.append(QWEN_Q2_COLOR)
         hatches.append("")
 
+    # Gemma 2 2B Q8 → Q4 → Q2 (ours).  No paper FP16 row — arXiv:2504.12285
+    # doesn't include Gemma-2 2B in Table 1.
+    g8_tps, g8_rss = _bench_row(gemma_q8_df) if gemma_q8_df is not None else (None, None)
+    g8_val = g8_tps if metric_col == "throughput_tokens_s" else g8_rss
+    if g8_val is not None:
+        labels.append("Gemma-2-2B-it Q8_0 (ours)")
+        values.append(g8_val)
+        colors.append(GEMMA_Q8_COLOR)
+        hatches.append("")
+
+    g4_tps, g4_rss = _bench_row(gemma_q4_df) if gemma_q4_df is not None else (None, None)
+    g4_val = g4_tps if metric_col == "throughput_tokens_s" else g4_rss
+    if g4_val is not None:
+        labels.append("Gemma-2-2B-it Q4_K_M (ours)")
+        values.append(g4_val)
+        colors.append(GEMMA_Q4_COLOR)
+        hatches.append("")
+
+    g2_tps, g2_rss = _bench_row(gemma_q2_df) if gemma_q2_df is not None else (None, None)
+    g2_val = g2_tps if metric_col == "throughput_tokens_s" else g2_rss
+    if g2_val is not None:
+        labels.append("Gemma-2-2B-it Q2_K (ours)")
+        values.append(g2_val)
+        colors.append(GEMMA_Q2_COLOR)
+        hatches.append("")
+
     if bitnet_local is not None:
         labels.append("BitNet b1.58 2B4T (ours)")
         values.append(bitnet_local)
@@ -596,22 +659,28 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
 
 def _legend_handles(qwen_q8_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | None = None,
                     qwen_q2_df: pd.DataFrame | None = None,
-                    llama_q4_df: pd.DataFrame | None = None):
+                    gemma_q8_df: pd.DataFrame | None = None,
+                    gemma_q4_df: pd.DataFrame | None = None,
+                    gemma_q2_df: pd.DataFrame | None = None):
     from matplotlib.patches import Patch
-    # All FP16 papers (including Qwen2.5 1.5B and LLaMA 3.2 1B) share a single
-    # legend entry so the legend doesn't double-count them as both
-    # "FP16 baseline" and standalone hatched series.
+    # All FP16 papers (including Qwen2.5 1.5B) share a single legend entry so
+    # the legend doesn't double-count them as both "FP16 baseline" and
+    # standalone hatched series.
     handles = [
         Patch(facecolor=OTHER_COLOR, edgecolor="#cccccc", label="FP16 baseline (paper)"),
     ]
-    if llama_q4_df is not None:
-        handles.append(Patch(facecolor=LLAMA_Q4_COLOR, edgecolor="#cccccc", label="Llama-3.2-1B Q4_K_M (ours)"))
     if qwen_q8_df is not None:
         handles.append(Patch(facecolor=QWEN_Q8_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q8_0 (ours)"))
     if qwen_q4_df is not None:
         handles.append(Patch(facecolor=QWEN_Q4_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q4_K_M (ours)"))
     if qwen_q2_df is not None:
         handles.append(Patch(facecolor=QWEN_Q2_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q2_K (ours)"))
+    if gemma_q8_df is not None:
+        handles.append(Patch(facecolor=GEMMA_Q8_COLOR, edgecolor="#cccccc", label="Gemma-2-2B-it Q8_0 (ours)"))
+    if gemma_q4_df is not None:
+        handles.append(Patch(facecolor=GEMMA_Q4_COLOR, edgecolor="#cccccc", label="Gemma-2-2B-it Q4_K_M (ours)"))
+    if gemma_q2_df is not None:
+        handles.append(Patch(facecolor=GEMMA_Q2_COLOR, edgecolor="#cccccc", label="Gemma-2-2B-it Q2_K (ours)"))
     handles += [
         Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc", label="BitNet b1.58 2B4T (ours)"),
         Patch(facecolor=BITNET_COLOR, hatch="///", edgecolor="#444444", label="BitNet b1.58 2B4T (paper)"),
@@ -623,13 +692,15 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
                     qwen_q8_df: pd.DataFrame | None = None,
                     qwen_q4_df: pd.DataFrame | None = None,
                     qwen_q2_df: pd.DataFrame | None = None,
-                    llama_q4_df: pd.DataFrame | None = None):
+                    gemma_q8_df: pd.DataFrame | None = None,
+                    gemma_q4_df: pd.DataFrame | None = None,
+                    gemma_q2_df: pd.DataFrame | None = None):
     """
     Single unified throughput plot with two panels:
 
       (a) Cross-model bar chart at (n_prompt=512, n_gen=128) — paper FP16
           baselines + BitNet (paper, ours) + Qwen (paper FP16, Q8/Q4/Q2 ours)
-          + Llama (paper FP16, Q4 ours).
+          + Gemma 2 2B (Q8/Q4/Q2 ours; no paper baseline).
       (b) Per-config sensitivity — grouped bars across the three benchmarked
           (n_prompt, n_gen) configs for our locally measured models.  The
           paper FP16 baselines only publish numbers at (512, 128), so they
@@ -639,14 +710,17 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
     has_q8 = _has_bench_data(qwen_q8_df)
     has_q4 = _has_bench_data(qwen_q4_df)
     has_q2 = _has_bench_data(qwen_q2_df)
-    has_llama = _has_bench_data(llama_q4_df)
-    if not (has_b or has_q8 or has_q4 or has_q2 or has_llama):
+    has_gemma_q8 = _has_bench_data(gemma_q8_df)
+    has_gemma_q4 = _has_bench_data(gemma_q4_df)
+    has_gemma_q2 = _has_bench_data(gemma_q2_df)
+    if not (has_b or has_q8 or has_q4 or has_q2 or has_gemma_q8 or has_gemma_q4 or has_gemma_q2):
         print("Skipping throughput plot: no benchmark CSVs (run 'make benchmark').")
         return
 
     labels, values, colors, hatches = _bar_series(
         local_df, qwen_q8_df, qwen_q4_df, "throughput_tokens_s",
-        qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df,
+        qwen_q2_df=qwen_q2_df,
+        gemma_q8_df=gemma_q8_df, gemma_q4_df=gemma_q4_df, gemma_q2_df=gemma_q2_df,
     )
     fig = plt.figure(figsize=(13, max(9, len(labels) * 0.55 + 4)))
     gs = fig.add_gridspec(2, 1, height_ratios=[len(labels) * 0.55, 4.5], hspace=0.35)
@@ -666,7 +740,8 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
     ax_main.set_xlim(0, max_val * 1.15)
     ax_main.invert_yaxis()
     ax_main.legend(
-        handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df, llama_q4_df),
+        handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df,
+                                gemma_q8_df, gemma_q4_df, gemma_q2_df),
         loc="upper right", fontsize=8,
     )
 
@@ -674,14 +749,18 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
     configs = [(512, 128), (512, 512), (1, 512)]
     config_labels = [f"p={p} / g={g}" for p, g in configs]
     series = []
-    if has_llama:
-        series.append(("Llama-3.2-1B Q4_K_M",  llama_q4_df, LLAMA_Q4_COLOR))
     if has_q8:
         series.append(("Qwen2.5-1.5B Q8_0",    qwen_q8_df,  QWEN_Q8_COLOR))
     if has_q4:
         series.append(("Qwen2.5-1.5B Q4_K_M",  qwen_q4_df,  QWEN_Q4_COLOR))
     if has_q2:
         series.append(("Qwen2.5-1.5B Q2_K",    qwen_q2_df,  QWEN_Q2_COLOR))
+    if has_gemma_q8:
+        series.append(("Gemma-2-2B-it Q8_0",   gemma_q8_df, GEMMA_Q8_COLOR))
+    if has_gemma_q4:
+        series.append(("Gemma-2-2B-it Q4_K_M", gemma_q4_df, GEMMA_Q4_COLOR))
+    if has_gemma_q2:
+        series.append(("Gemma-2-2B-it Q2_K",   gemma_q2_df, GEMMA_Q2_COLOR))
     if has_b:
         series.append(("BitNet b1.58 2B4T",    local_df,    BITNET_COLOR))
 
@@ -820,7 +899,9 @@ def _load_arch_throughput(subdir: str | None) -> dict[str, float] | None:
         ("Qwen2.5-1.5B Q8_0",    "qwen_q8_step_metrics.csv"),
         ("Qwen2.5-1.5B Q4_K_M",  "qwen_q4_step_metrics.csv"),
         ("Qwen2.5-1.5B Q2_K",    "qwen_q2_step_metrics.csv"),
-        ("Llama-3.2-1B Q4_K_M",  "llama_q4_step_metrics.csv"),
+        ("Gemma-2-2B-it Q8_0",   "gemma_q8_step_metrics.csv"),
+        ("Gemma-2-2B-it Q4_K_M", "gemma_q4_step_metrics.csv"),
+        ("Gemma-2-2B-it Q2_K",   "gemma_q2_step_metrics.csv"),
     ]:
         path = _arch_csv_path(subdir, filename)
         if not path.exists() or path.stat().st_size == 0:
@@ -841,9 +922,10 @@ def plot_cross_arch_throughput(out_dir: Path):
 
     Bars grouped by model on the x-axis; one bar per architecture within
     each group.  Reads from results/<subdir>/{bitnet,qwen_q8,qwen_q4,
-    qwen_q2,llama_q4}_step_metrics.csv per CROSS_ARCH_SOURCES.  Models
-    and architectures with no readable CSVs are dropped silently so the
-    plot degrades gracefully while the AWS sweep is being filled in.
+    qwen_q2,gemma_q8,gemma_q4,gemma_q2}_step_metrics.csv per
+    CROSS_ARCH_SOURCES.  Models and architectures with no readable CSVs
+    are dropped silently so the plot degrades gracefully while the AWS
+    sweep is being filled in.
 
     Backs REPORT §6.1 (cross-architecture generalization): if BitNet's
     advantage over Qwen Q8 holds on AMD AVX2 and ARM Neon, the Pareto
@@ -870,7 +952,8 @@ def plot_cross_arch_throughput(out_dir: Path):
     # so the plot doesn't reserve x-slots for models that nothing populates.
     candidate_models = [
         "BitNet b1.58 2B4T", "Qwen2.5-1.5B Q8_0", "Qwen2.5-1.5B Q4_K_M",
-        "Qwen2.5-1.5B Q2_K", "Llama-3.2-1B Q4_K_M",
+        "Qwen2.5-1.5B Q2_K",
+        "Gemma-2-2B-it Q8_0", "Gemma-2-2B-it Q4_K_M", "Gemma-2-2B-it Q2_K",
     ]
     models = [m for m in candidate_models
               if any(m in data for _, _, data in archs)]
@@ -915,14 +998,18 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path,
                 qwen_q8_df: pd.DataFrame | None = None,
                 qwen_q4_df: pd.DataFrame | None = None,
                 qwen_q2_df: pd.DataFrame | None = None,
-                llama_q4_df: pd.DataFrame | None = None):
+                gemma_q8_df: pd.DataFrame | None = None,
+                gemma_q4_df: pd.DataFrame | None = None,
+                gemma_q2_df: pd.DataFrame | None = None):
     if not any(_has_bench_data(d) for d in
-               (local_df, qwen_q8_df, qwen_q4_df, qwen_q2_df, llama_q4_df)):
+               (local_df, qwen_q8_df, qwen_q4_df, qwen_q2_df,
+                gemma_q8_df, gemma_q4_df, gemma_q2_df)):
         print("Skipping memory plot: no benchmark CSVs (run 'make benchmark').")
         return
     labels, values, colors, hatches = _bar_series(
         local_df, qwen_q8_df, qwen_q4_df, "peak_rss_mb",
-        qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df,
+        qwen_q2_df=qwen_q2_df,
+        gemma_q8_df=gemma_q8_df, gemma_q4_df=gemma_q4_df, gemma_q2_df=gemma_q2_df,
     )
 
     fig, ax = plt.subplots(figsize=(10, max(5, len(labels) * 0.55)))
@@ -934,12 +1021,13 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path,
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels(labels)
     ax.set_xlabel("Peak RSS (MB)")
-    ax.set_title("Peak Memory: BitNet b1.58 2B4T, Qwen2.5 1.5B & Llama-3.2 1B vs FP16 Baselines\n"
+    ax.set_title("Peak Memory: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines\n"
                  "(n_prompt=512, n_gen=128, CPU)")
     ax.set_xlim(0, max_val * 1.18)
     ax.invert_yaxis()
     ax.legend(
-        handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df, llama_q4_df),
+        handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df,
+                                gemma_q8_df, gemma_q4_df, gemma_q2_df),
         loc="lower right", fontsize=8,
     )
     fig.tight_layout()
@@ -953,20 +1041,19 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
                   qwen_q8_acc: dict | None = None,
                   qwen_q4_acc: dict | None = None,
                   qwen_q2_acc: dict | None = None,
-                  llama_q4_acc: dict | None = None):
+                  gemma_q8_acc: dict | None = None,
+                  gemma_q4_acc: dict | None = None,
+                  gemma_q2_acc: dict | None = None):
     tasks = ["arc_easy", "arc_challenge", "winogrande", "hellaswag", "mmlu"]
     task_labels = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
     task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
     other_models = list(OTHER_BASELINES.keys())
-    # Column order: LLaMA paper FP16 → Llama Q4 ours → Qwen paper FP16 →
-    # Qwen Q8/Q4/Q2 ours → BitNet ours → BitNet paper.  Each FP16 paper row
-    # sits next to its locally-measured quantized counterpart.
+    # Column order: other FP16 papers (currently none) → Qwen paper FP16 →
+    # Qwen Q8/Q4/Q2 ours → Gemma 2 2B Q8/Q4/Q2 ours (no paper baseline) →
+    # BitNet ours → BitNet paper.  Each FP16 paper row sits next to its
+    # locally-measured quantized counterpart where one exists.
     all_models = list(other_models)
-    extra_accs: list[dict] = []
-    if llama_q4_acc is not None:
-        all_models.append("Llama-3.2-1B\nQ4_K_M (ours)")
-        extra_accs.append(llama_q4_acc)
     all_models.append("Qwen2.5 1.5B\n(paper FP16)")
     if qwen_q8_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ8_0 (ours)")
@@ -974,6 +1061,12 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
         all_models.append("Qwen2.5-1.5B\nQ4_K_M (ours)")
     if qwen_q2_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ2_K (ours)")
+    if gemma_q8_acc is not None:
+        all_models.append("Gemma-2-2B-it\nQ8_0 (ours)")
+    if gemma_q4_acc is not None:
+        all_models.append("Gemma-2-2B-it\nQ4_K_M (ours)")
+    if gemma_q2_acc is not None:
+        all_models.append("Gemma-2-2B-it\nQ2_K (ours)")
     all_models += ["BitNet b1.58 2B4T\n(ours)", "BitNet b1.58 2B4T\n(paper)"]
 
     x = np.arange(len(all_models))
@@ -984,8 +1077,6 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
     fig, ax = plt.subplots(figsize=(max(14, len(all_models) * 1.6), 6))
     for i, (task, label, color) in enumerate(zip(tasks, task_labels, task_colors)):
         vals: list[float] = [OTHER_BASELINES[m][task] for m in other_models]
-        if llama_q4_acc is not None:
-            vals.append(llama_q4_acc.get(task) or 0)
         vals.append(QWEN_PAPER[task])
         if qwen_q8_acc is not None:
             vals.append(qwen_q8_acc.get(task) or 0)
@@ -993,6 +1084,12 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
             vals.append(qwen_q4_acc.get(task) or 0)
         if qwen_q2_acc is not None:
             vals.append(qwen_q2_acc.get(task) or 0)
+        if gemma_q8_acc is not None:
+            vals.append(gemma_q8_acc.get(task) or 0)
+        if gemma_q4_acc is not None:
+            vals.append(gemma_q4_acc.get(task) or 0)
+        if gemma_q2_acc is not None:
+            vals.append(gemma_q2_acc.get(task) or 0)
         vals += [local_acc.get(task) or 0, BITNET_PAPER[task]]
         ax.bar(x + offsets[i], vals, width, label=label, color=color)
 
@@ -1001,7 +1098,7 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
     ax.set_ylabel("Accuracy (%)")
     ax.set_ylim(0, 105)
     ax.set_title(
-        "Accuracy Comparison: BitNet b1.58 2B4T, Qwen2.5 1.5B & Llama-3.2 1B vs FP16 Baselines\n"
+        "Accuracy Comparison: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines\n"
         "(0-shot except MMLU 5-shot; WinoGrande & HellaSwag use continuation scoring)"
     )
     ax.legend()
@@ -1061,9 +1158,10 @@ def _accuracy_scatter(
     QWEN_OURS_NAME    = "Qwen2.5-1.5B-Instruct Q8_0"
     QWEN_Q4_OURS_NAME = "Qwen2.5-1.5B-Instruct Q4_K_M"
     QWEN_Q2_OURS_NAME = "Qwen2.5-1.5B-Instruct Q2_K"
-    LLAMA_Q4_OURS_NAME = "Llama-3.2-1B-Instruct Q4_K_M"
+    GEMMA_Q8_OURS_NAME = "Gemma-2-2B-it Q8_0"
+    GEMMA_Q4_OURS_NAME = "Gemma-2-2B-it Q4_K_M"
+    GEMMA_Q2_OURS_NAME = "Gemma-2-2B-it Q2_K"
     QWEN_PAPER_NAME   = "Qwen2.5 1.5B"
-    LLAMA_PAPER_NAME  = "LLaMA 3.2 1B"
     BITNET_NAME       = "BitNet b1.58 2B4T"
 
     by_key = {
@@ -1072,13 +1170,14 @@ def _accuracy_scatter(
     }
     # Dotted connectors visualize the paper→ours or quant-chain delta.
     # Qwen chain: FP16 paper → Q8 → Q4 → Q2 (ours).
-    # Llama chain: FP16 paper → Q4 (ours).
+    # Gemma chain: Q8 → Q4 → Q2 (ours) — no paper FP16 baseline available.
     for ours_key, from_key, color in [
-        ((BITNET_NAME, "ours"),         (BITNET_NAME, "paper"),             BITNET_COLOR),
-        ((QWEN_OURS_NAME, "ours"),      (QWEN_PAPER_NAME, "paper (FP16)"),  QWEN_Q8_COLOR),
-        ((QWEN_Q4_OURS_NAME, "ours"),   (QWEN_OURS_NAME, "ours"),           QWEN_Q4_COLOR),
-        ((QWEN_Q2_OURS_NAME, "ours"),   (QWEN_Q4_OURS_NAME, "ours"),        QWEN_Q2_COLOR),
-        ((LLAMA_Q4_OURS_NAME, "ours"),  (LLAMA_PAPER_NAME, "paper (FP16)"), LLAMA_Q4_COLOR),
+        ((BITNET_NAME, "ours"),          (BITNET_NAME, "paper"),             BITNET_COLOR),
+        ((QWEN_OURS_NAME, "ours"),       (QWEN_PAPER_NAME, "paper (FP16)"),  QWEN_Q8_COLOR),
+        ((QWEN_Q4_OURS_NAME, "ours"),    (QWEN_OURS_NAME, "ours"),           QWEN_Q4_COLOR),
+        ((QWEN_Q2_OURS_NAME, "ours"),    (QWEN_Q4_OURS_NAME, "ours"),        QWEN_Q2_COLOR),
+        ((GEMMA_Q4_OURS_NAME, "ours"),   (GEMMA_Q8_OURS_NAME, "ours"),       GEMMA_Q4_COLOR),
+        ((GEMMA_Q2_OURS_NAME, "ours"),   (GEMMA_Q4_OURS_NAME, "ours"),       GEMMA_Q2_COLOR),
     ]:
         if ours_key in by_key and from_key in by_key:
             x0, y0 = by_key[from_key]
@@ -1090,11 +1189,12 @@ def _accuracy_scatter(
         is_qwen_q8_ours    = source == "ours" and model == QWEN_OURS_NAME
         is_qwen_q4_ours    = source == "ours" and model == QWEN_Q4_OURS_NAME
         is_qwen_q2_ours    = source == "ours" and model == QWEN_Q2_OURS_NAME
-        is_llama_q4_ours   = source == "ours" and model == LLAMA_Q4_OURS_NAME
+        is_gemma_q8_ours   = source == "ours" and model == GEMMA_Q8_OURS_NAME
+        is_gemma_q4_ours   = source == "ours" and model == GEMMA_Q4_OURS_NAME
+        is_gemma_q2_ours   = source == "ours" and model == GEMMA_Q2_OURS_NAME
         is_ours = source == "ours"
-        # Qwen / LLaMA FP16 paper rows collapse into the generic
-        # "FP16 baseline (paper)" legend entry — same color, marker, label as
-        # the other paper FP16 rows.
+        # Qwen FP16 paper rows collapse into the generic "FP16 baseline (paper)"
+        # legend entry — same color, marker, label as the other paper FP16 rows.
         if source == "paper (FP16)":
             color, label = OTHER_COLOR, "FP16 baseline (paper)"
         elif source == "paper":
@@ -1105,8 +1205,12 @@ def _accuracy_scatter(
             color, label = QWEN_Q4_COLOR, "Qwen2.5-1.5B Q4_K_M (ours)"
         elif is_qwen_q8_ours:
             color, label = QWEN_Q8_COLOR, "Qwen2.5-1.5B Q8_0 (ours)"
-        elif is_llama_q4_ours:
-            color, label = LLAMA_Q4_COLOR, "Llama-3.2-1B Q4_K_M (ours)"
+        elif is_gemma_q2_ours:
+            color, label = GEMMA_Q2_COLOR, "Gemma-2-2B-it Q2_K (ours)"
+        elif is_gemma_q4_ours:
+            color, label = GEMMA_Q4_COLOR, "Gemma-2-2B-it Q4_K_M (ours)"
+        elif is_gemma_q8_ours:
+            color, label = GEMMA_Q8_COLOR, "Gemma-2-2B-it Q8_0 (ours)"
         else:
             color, label = BITNET_COLOR, "BitNet b1.58 2B4T (ours)"
 
@@ -1127,7 +1231,7 @@ def _accuracy_scatter(
             ann = (model
                    .replace(" b1.58 2B4T", "")
                    .replace("Qwen2.5-1.5B-Instruct ", "Qwen ")
-                   .replace("Llama-3.2-1B-Instruct ", "Llama ")) + " (ours)"
+                   .replace("Gemma-2-2B-it ", "Gemma ")) + " (ours)"
         else:
             ann = model.replace(" (FP16)", "") + " (paper)"
         # Stagger ours offsets so co-located points don't overlap.
@@ -1135,7 +1239,11 @@ def _accuracy_scatter(
             xy_offset = (8, -34)
         elif is_qwen_q4_ours:
             xy_offset = (8, -22)
-        elif is_llama_q4_ours:
+        elif is_gemma_q2_ours:
+            xy_offset = (-90, -34)
+        elif is_gemma_q4_ours:
+            xy_offset = (-90, -22)
+        elif is_gemma_q8_ours:
             xy_offset = (-90, -10)
         elif is_ours:
             xy_offset = (8, -10)
@@ -1180,7 +1288,9 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
 def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
                        out_dir: Path, qwen_q4_df: pd.DataFrame | None = None,
                        qwen_q2_df: pd.DataFrame | None = None,
-                       llama_q4_df: pd.DataFrame | None = None):
+                       gemma_q8_df: pd.DataFrame | None = None,
+                       gemma_q4_df: pd.DataFrame | None = None,
+                       gemma_q2_df: pd.DataFrame | None = None):
     """
     Energy + carbon footprint per 1,000 tokens at n_prompt=512, n_gen=128.
 
@@ -1204,30 +1314,39 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         return float(vals.median() * scale / (512 + 128))
 
     # Wh = kWh × 1000;  g = kg × 1000.  Both × 1000 again to express "per 1k tokens".
-    bitnet_wh    = per_1k(local_df,    "energy_kwh", 1_000_000)
-    qwen_q8_wh   = per_1k(qwen_q8_df,  "energy_kwh", 1_000_000)
-    qwen_q4_wh   = per_1k(qwen_q4_df,  "energy_kwh", 1_000_000)
-    qwen_q2_wh   = per_1k(qwen_q2_df,  "energy_kwh", 1_000_000)
-    llama_wh     = per_1k(llama_q4_df, "energy_kwh", 1_000_000)
-    bitnet_gco2  = per_1k(local_df,    "co2_kg",     1_000_000)
-    qwen_q8_gco2 = per_1k(qwen_q8_df,  "co2_kg",     1_000_000)
-    qwen_q4_gco2 = per_1k(qwen_q4_df,  "co2_kg",     1_000_000)
-    qwen_q2_gco2 = per_1k(qwen_q2_df,  "co2_kg",     1_000_000)
-    llama_gco2   = per_1k(llama_q4_df, "co2_kg",     1_000_000)
+    bitnet_wh     = per_1k(local_df,     "energy_kwh", 1_000_000)
+    qwen_q8_wh    = per_1k(qwen_q8_df,   "energy_kwh", 1_000_000)
+    qwen_q4_wh    = per_1k(qwen_q4_df,   "energy_kwh", 1_000_000)
+    qwen_q2_wh    = per_1k(qwen_q2_df,   "energy_kwh", 1_000_000)
+    gemma_q8_wh   = per_1k(gemma_q8_df,  "energy_kwh", 1_000_000)
+    gemma_q4_wh   = per_1k(gemma_q4_df,  "energy_kwh", 1_000_000)
+    gemma_q2_wh   = per_1k(gemma_q2_df,  "energy_kwh", 1_000_000)
+    bitnet_gco2   = per_1k(local_df,     "co2_kg",     1_000_000)
+    qwen_q8_gco2  = per_1k(qwen_q8_df,   "co2_kg",     1_000_000)
+    qwen_q4_gco2  = per_1k(qwen_q4_df,   "co2_kg",     1_000_000)
+    qwen_q2_gco2  = per_1k(qwen_q2_df,   "co2_kg",     1_000_000)
+    gemma_q8_gco2 = per_1k(gemma_q8_df,  "co2_kg",     1_000_000)
+    gemma_q4_gco2 = per_1k(gemma_q4_df,  "co2_kg",     1_000_000)
+    gemma_q2_gco2 = per_1k(gemma_q2_df,  "co2_kg",     1_000_000)
 
-    if all(v is None for v in (bitnet_wh, qwen_q8_wh, qwen_q4_wh, qwen_q2_wh, llama_wh)):
+    if all(v is None for v in (bitnet_wh, qwen_q8_wh, qwen_q4_wh, qwen_q2_wh,
+                               gemma_q8_wh, gemma_q4_wh, gemma_q2_wh)):
         print("Skipping energy/carbon plot: no energy_kwh data in benchmark CSVs.")
         return
 
     rows: list[tuple[str, str, float | None, float | None]] = []
-    if llama_wh is not None:
-        rows.append(("Llama-3.2-1B Q4_K_M (ours)", LLAMA_Q4_COLOR, llama_wh, llama_gco2))
     if qwen_q8_wh is not None:
         rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_Q8_COLOR, qwen_q8_wh, qwen_q8_gco2))
     if qwen_q4_wh is not None:
         rows.append(("Qwen2.5-1.5B Q4_K_M (ours)", QWEN_Q4_COLOR, qwen_q4_wh, qwen_q4_gco2))
     if qwen_q2_wh is not None:
         rows.append(("Qwen2.5-1.5B Q2_K (ours)", QWEN_Q2_COLOR, qwen_q2_wh, qwen_q2_gco2))
+    if gemma_q8_wh is not None:
+        rows.append(("Gemma-2-2B-it Q8_0 (ours)", GEMMA_Q8_COLOR, gemma_q8_wh, gemma_q8_gco2))
+    if gemma_q4_wh is not None:
+        rows.append(("Gemma-2-2B-it Q4_K_M (ours)", GEMMA_Q4_COLOR, gemma_q4_wh, gemma_q4_gco2))
+    if gemma_q2_wh is not None:
+        rows.append(("Gemma-2-2B-it Q2_K (ours)", GEMMA_Q2_COLOR, gemma_q2_wh, gemma_q2_gco2))
     if bitnet_wh is not None:
         rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2))
 
@@ -1284,7 +1403,9 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
                                hardware_rate: float,
                                electricity_rate: float,
                                qwen_q2_df: pd.DataFrame | None = None,
-                               llama_q4_df: pd.DataFrame | None = None):
+                               gemma_q8_df: pd.DataFrame | None = None,
+                               gemma_q4_df: pd.DataFrame | None = None,
+                               gemma_q2_df: pd.DataFrame | None = None):
     """
     Cost-per-1k-output-tokens across self-hosted (BitNet / Qwen) and cloud
     API services.  Each self-hosted model contributes two bars:
@@ -1296,10 +1417,12 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
     """
     entries: list[tuple[str, float, str, str]] = []  # (label, cost, color, hatch)
     for name, df, color in [
-        ("Llama-3.2-1B Q4_K_M",  llama_q4_df, LLAMA_Q4_COLOR),
         ("Qwen2.5-1.5B Q8_0",    qwen_q8_df,  QWEN_Q8_COLOR),
         ("Qwen2.5-1.5B Q4_K_M",  qwen_q4_df,  QWEN_Q4_COLOR),
         ("Qwen2.5-1.5B Q2_K",    qwen_q2_df,  QWEN_Q2_COLOR),
+        ("Gemma-2-2B-it Q8_0",   gemma_q8_df, GEMMA_Q8_COLOR),
+        ("Gemma-2-2B-it Q4_K_M", gemma_q4_df, GEMMA_Q4_COLOR),
+        ("Gemma-2-2B-it Q2_K",   gemma_q2_df, GEMMA_Q2_COLOR),
         ("BitNet b1.58 2B4T",    local_df,    BITNET_COLOR),
     ]:
         if df is None or df.empty:
@@ -1353,18 +1476,13 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
 
     from matplotlib.patches import Patch
     handles = []
-    have_bitnet  = any(label.startswith("BitNet") for label, *_ in entries)
-    have_qwen_q8 = any(label.startswith("Qwen2.5-1.5B Q8_0") for label, *_ in entries)
-    have_q4      = any(label.startswith("Qwen2.5-1.5B Q4_K_M") for label, *_ in entries)
-    have_q2      = any(label.startswith("Qwen2.5-1.5B Q2_K") for label, *_ in entries)
-    have_llama   = any(label.startswith("Llama-3.2-1B") for label, *_ in entries)
-    if have_llama:
-        handles += [
-            Patch(facecolor=LLAMA_Q4_COLOR, hatch="///", edgecolor="#444444",
-                  label="Llama Q4_K_M (ours, AWS proxy)"),
-            Patch(facecolor=LLAMA_Q4_COLOR, edgecolor="#cccccc",
-                  label="Llama Q4_K_M (ours, local electricity)"),
-        ]
+    have_bitnet   = any(label.startswith("BitNet") for label, *_ in entries)
+    have_qwen_q8  = any(label.startswith("Qwen2.5-1.5B Q8_0") for label, *_ in entries)
+    have_q4       = any(label.startswith("Qwen2.5-1.5B Q4_K_M") for label, *_ in entries)
+    have_q2       = any(label.startswith("Qwen2.5-1.5B Q2_K") for label, *_ in entries)
+    have_gemma_q8 = any(label.startswith("Gemma-2-2B-it Q8_0") for label, *_ in entries)
+    have_gemma_q4 = any(label.startswith("Gemma-2-2B-it Q4_K_M") for label, *_ in entries)
+    have_gemma_q2 = any(label.startswith("Gemma-2-2B-it Q2_K") for label, *_ in entries)
     if have_qwen_q8:
         handles += [
             Patch(facecolor=QWEN_Q8_COLOR, hatch="///", edgecolor="#444444",
@@ -1385,6 +1503,27 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
                   label="Qwen Q2_K (ours, AWS proxy)"),
             Patch(facecolor=QWEN_Q2_COLOR, edgecolor="#cccccc",
                   label="Qwen Q2_K (ours, local electricity)"),
+        ]
+    if have_gemma_q8:
+        handles += [
+            Patch(facecolor=GEMMA_Q8_COLOR, hatch="///", edgecolor="#444444",
+                  label="Gemma Q8_0 (ours, AWS proxy)"),
+            Patch(facecolor=GEMMA_Q8_COLOR, edgecolor="#cccccc",
+                  label="Gemma Q8_0 (ours, local electricity)"),
+        ]
+    if have_gemma_q4:
+        handles += [
+            Patch(facecolor=GEMMA_Q4_COLOR, hatch="///", edgecolor="#444444",
+                  label="Gemma Q4_K_M (ours, AWS proxy)"),
+            Patch(facecolor=GEMMA_Q4_COLOR, edgecolor="#cccccc",
+                  label="Gemma Q4_K_M (ours, local electricity)"),
+        ]
+    if have_gemma_q2:
+        handles += [
+            Patch(facecolor=GEMMA_Q2_COLOR, hatch="///", edgecolor="#444444",
+                  label="Gemma Q2_K (ours, AWS proxy)"),
+            Patch(facecolor=GEMMA_Q2_COLOR, edgecolor="#cccccc",
+                  label="Gemma Q2_K (ours, local electricity)"),
         ]
     if have_bitnet:
         handles += [
@@ -1442,11 +1581,13 @@ def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
                                    qwen_q8_acc: dict | None = None,
                                    qwen_q4_acc: dict | None = None,
                                    qwen_q2_acc: dict | None = None,
-                                   llama_q4_acc: dict | None = None):
+                                   gemma_q8_acc: dict | None = None,
+                                   gemma_q4_acc: dict | None = None,
+                                   gemma_q2_acc: dict | None = None):
     """
     Grouped-bar accuracy plot mirroring plot_accuracy(), but comparing our
-    locally-measured models (BitNet, Qwen Q8/Q4/Q2, Llama Q4) against cloud
-    subscription APIs from CLOUD_API_PRICING.
+    locally-measured models (BitNet, Qwen Q8/Q4/Q2, Gemma 2 2B Q8/Q4/Q2)
+    against cloud subscription APIs from CLOUD_API_PRICING.
 
     Cloud values come from CLOUD_API_ACCURACY.  Most providers only publish
     MMLU, so non-MMLU bars for cloud rows are typically empty (rendered as 0
@@ -1459,9 +1600,6 @@ def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
 
     all_models: list[str] = []
     model_accs: dict[str, dict] = {}
-    if llama_q4_acc is not None:
-        label = "Llama-3.2-1B\nQ4_K_M (ours)"
-        all_models.append(label); model_accs[label] = llama_q4_acc
     if qwen_q8_acc is not None:
         label = "Qwen2.5-1.5B\nQ8_0 (ours)"
         all_models.append(label); model_accs[label] = qwen_q8_acc
@@ -1471,6 +1609,15 @@ def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
     if qwen_q2_acc is not None:
         label = "Qwen2.5-1.5B\nQ2_K (ours)"
         all_models.append(label); model_accs[label] = qwen_q2_acc
+    if gemma_q8_acc is not None:
+        label = "Gemma-2-2B-it\nQ8_0 (ours)"
+        all_models.append(label); model_accs[label] = gemma_q8_acc
+    if gemma_q4_acc is not None:
+        label = "Gemma-2-2B-it\nQ4_K_M (ours)"
+        all_models.append(label); model_accs[label] = gemma_q4_acc
+    if gemma_q2_acc is not None:
+        label = "Gemma-2-2B-it\nQ2_K (ours)"
+        all_models.append(label); model_accs[label] = gemma_q2_acc
     label = "BitNet b1.58 2B4T\n(ours)"
     all_models.append(label); model_accs[label] = local_acc
 
@@ -1524,7 +1671,9 @@ def plot_cloud_cost_accuracy(comparison_df: pd.DataFrame, out_dir: Path):
     QWEN_Q8_NAME = "Qwen2.5-1.5B-Instruct Q8_0"
     QWEN_Q4_NAME = "Qwen2.5-1.5B-Instruct Q4_K_M"
     QWEN_Q2_NAME = "Qwen2.5-1.5B-Instruct Q2_K"
-    LLAMA_Q4_NAME = "Llama-3.2-1B-Instruct Q4_K_M"
+    GEMMA_Q8_NAME = "Gemma-2-2B-it Q8_0"
+    GEMMA_Q4_NAME = "Gemma-2-2B-it Q4_K_M"
+    GEMMA_Q2_NAME = "Gemma-2-2B-it Q2_K"
     BITNET_NAME = "BitNet b1.58 2B4T"
 
     fig, ax = plt.subplots(figsize=(11, 7))
@@ -1549,9 +1698,15 @@ def plot_cloud_cost_accuracy(comparison_df: pd.DataFrame, out_dir: Path):
         elif model == QWEN_Q2_NAME:
             color, label = QWEN_Q2_COLOR, "Qwen2.5-1.5B Q2_K (ours)"
             ann, xy_offset = "Qwen Q2_K (ours)", (8, -34)
-        elif model == LLAMA_Q4_NAME:
-            color, label = LLAMA_Q4_COLOR, "Llama-3.2-1B Q4_K_M (ours)"
-            ann, xy_offset = "Llama Q4_K_M (ours)", (-100, -10)
+        elif model == GEMMA_Q8_NAME:
+            color, label = GEMMA_Q8_COLOR, "Gemma-2-2B-it Q8_0 (ours)"
+            ann, xy_offset = "Gemma Q8_0 (ours)", (-100, -10)
+        elif model == GEMMA_Q4_NAME:
+            color, label = GEMMA_Q4_COLOR, "Gemma-2-2B-it Q4_K_M (ours)"
+            ann, xy_offset = "Gemma Q4_K_M (ours)", (-100, -22)
+        elif model == GEMMA_Q2_NAME:
+            color, label = GEMMA_Q2_COLOR, "Gemma-2-2B-it Q2_K (ours)"
+            ann, xy_offset = "Gemma Q2_K (ours)", (-100, -34)
         else:
             continue
         ax.scatter(cost, mmlu, facecolors=color, edgecolors=color, marker="D",
@@ -1600,7 +1755,9 @@ def plot_mmlu_subject_heatmap(
     qwen_q4_full: dict | None,
     out_dir: Path,
     qwen_q2_full: dict | None = None,
-    llama_q4_full: dict | None = None,
+    gemma_q8_full: dict | None = None,
+    gemma_q4_full: dict | None = None,
+    gemma_q2_full: dict | None = None,
 ):
     """
     Heatmap of MMLU per-subject accuracy for the locally-measured models.
@@ -1616,10 +1773,12 @@ def plot_mmlu_subject_heatmap(
 
     models: list[tuple[str, dict]] = []
     for label, full in [
-        ("Llama Q4_K_M", llama_q4_full),
         ("Qwen Q8_0",    qwen_q8_full),
         ("Qwen Q4_K_M",  qwen_q4_full),
         ("Qwen Q2_K",    qwen_q2_full),
+        ("Gemma Q8_0",   gemma_q8_full),
+        ("Gemma Q4_K_M", gemma_q4_full),
+        ("Gemma Q2_K",   gemma_q2_full),
         ("BitNet 2B4T",  bitnet_full),
     ]:
         if full is not None and "mmlu" in full and "subjects" in full["mmlu"]:
@@ -1707,7 +1866,9 @@ def plot_accuracy_eval_cost(
     qwen_q4_full: dict | None,
     out_dir: Path,
     qwen_q2_full: dict | None = None,
-    llama_q4_full: dict | None = None,
+    gemma_q8_full: dict | None = None,
+    gemma_q4_full: dict | None = None,
+    gemma_q2_full: dict | None = None,
 ):
     """
     Total wall-clock time and energy consumed by the accuracy evaluation
@@ -1730,10 +1891,12 @@ def plot_accuracy_eval_cost(
 
     series: list[tuple[str, str, dict]] = []
     for label, color, full in [
-        ("Llama Q4_K_M", LLAMA_Q4_COLOR, llama_q4_full),
         ("Qwen Q8_0",    QWEN_Q8_COLOR,  qwen_q8_full),
         ("Qwen Q4_K_M",  QWEN_Q4_COLOR,  qwen_q4_full),
         ("Qwen Q2_K",    QWEN_Q2_COLOR,  qwen_q2_full),
+        ("Gemma Q8_0",   GEMMA_Q8_COLOR, gemma_q8_full),
+        ("Gemma Q4_K_M", GEMMA_Q4_COLOR, gemma_q4_full),
+        ("Gemma Q2_K",   GEMMA_Q2_COLOR, gemma_q2_full),
         ("BitNet 2B4T",  BITNET_COLOR,   bitnet_full),
     ]:
         if full is None:
@@ -1821,9 +1984,15 @@ def main():
     qwen_q2_df = load_qwen(Path(args.qwen_q2_results))
     qwen_q2_acc = load_accuracy(Path(args.qwen_q2_accuracy))
     qwen_q2_acc_full = load_accuracy_full(Path(args.qwen_q2_accuracy))
-    llama_q4_df = load_qwen(Path(args.llama_q4_results))
-    llama_q4_acc = load_accuracy(Path(args.llama_q4_accuracy))
-    llama_q4_acc_full = load_accuracy_full(Path(args.llama_q4_accuracy))
+    gemma_q8_df = load_qwen(Path(args.gemma_q8_results))
+    gemma_q8_acc = load_accuracy(Path(args.gemma_q8_accuracy))
+    gemma_q8_acc_full = load_accuracy_full(Path(args.gemma_q8_accuracy))
+    gemma_q4_df = load_qwen(Path(args.gemma_q4_results))
+    gemma_q4_acc = load_accuracy(Path(args.gemma_q4_accuracy))
+    gemma_q4_acc_full = load_accuracy_full(Path(args.gemma_q4_accuracy))
+    gemma_q2_df = load_qwen(Path(args.gemma_q2_results))
+    gemma_q2_acc = load_accuracy(Path(args.gemma_q2_accuracy))
+    gemma_q2_acc_full = load_accuracy_full(Path(args.gemma_q2_accuracy))
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     comparison_df = build_comparison_df(
@@ -1831,33 +2000,53 @@ def main():
         qwen_q8_df, qwen_q8_acc,
         qwen_q4_df, qwen_q4_acc,
         qwen_q2_df=qwen_q2_df, qwen_q2_acc=qwen_q2_acc,
-        llama_q4_df=llama_q4_df, llama_q4_acc=llama_q4_acc,
+        gemma_q8_df=gemma_q8_df, gemma_q8_acc=gemma_q8_acc,
+        gemma_q4_df=gemma_q4_df, gemma_q4_acc=gemma_q4_acc,
+        gemma_q2_df=gemma_q2_df, gemma_q2_acc=gemma_q2_acc,
         electricity_rate=args.electricity_rate,
     )
     write_comparison_csv(comparison_df, Path(args.csv))
 
     plot_throughput(local_df, PLOTS_DIR, qwen_q8_df, qwen_q4_df,
-                    qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df)
+                    qwen_q2_df=qwen_q2_df,
+                    gemma_q8_df=gemma_q8_df, gemma_q4_df=gemma_q4_df,
+                    gemma_q2_df=gemma_q2_df)
     plot_thread_scaling(PLOTS_DIR)
     plot_cross_arch_throughput(PLOTS_DIR)
     plot_memory(local_df, PLOTS_DIR, qwen_q8_df, qwen_q4_df,
-                qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df)
+                qwen_q2_df=qwen_q2_df,
+                gemma_q8_df=gemma_q8_df, gemma_q4_df=gemma_q4_df,
+                gemma_q2_df=gemma_q2_df)
     plot_accuracy(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc,
-                  qwen_q2_acc=qwen_q2_acc, llama_q4_acc=llama_q4_acc)
+                  qwen_q2_acc=qwen_q2_acc,
+                  gemma_q8_acc=gemma_q8_acc, gemma_q4_acc=gemma_q4_acc,
+                  gemma_q2_acc=gemma_q2_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
     plot_energy_carbon(local_df, qwen_q8_df, PLOTS_DIR, qwen_q4_df,
-                       qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df)
+                       qwen_q2_df=qwen_q2_df,
+                       gemma_q8_df=gemma_q8_df, gemma_q4_df=gemma_q4_df,
+                       gemma_q2_df=gemma_q2_df)
     plot_cloud_cost_comparison(local_df, qwen_q8_df, qwen_q4_df, PLOTS_DIR,
                                args.hardware_rate, args.electricity_rate,
-                               qwen_q2_df=qwen_q2_df, llama_q4_df=llama_q4_df)
+                               qwen_q2_df=qwen_q2_df,
+                               gemma_q8_df=gemma_q8_df, gemma_q4_df=gemma_q4_df,
+                               gemma_q2_df=gemma_q2_df)
     plot_memory_accuracy(comparison_df, PLOTS_DIR)
     plot_cloud_accuracy_comparison(local_acc, PLOTS_DIR, qwen_q8_acc, qwen_q4_acc,
-                                   qwen_q2_acc=qwen_q2_acc, llama_q4_acc=llama_q4_acc)
+                                   qwen_q2_acc=qwen_q2_acc,
+                                   gemma_q8_acc=gemma_q8_acc, gemma_q4_acc=gemma_q4_acc,
+                                   gemma_q2_acc=gemma_q2_acc)
     plot_cloud_cost_accuracy(comparison_df, PLOTS_DIR)
     plot_mmlu_subject_heatmap(local_acc_full, qwen_q8_acc_full, qwen_q4_acc_full, PLOTS_DIR,
-                              qwen_q2_full=qwen_q2_acc_full, llama_q4_full=llama_q4_acc_full)
+                              qwen_q2_full=qwen_q2_acc_full,
+                              gemma_q8_full=gemma_q8_acc_full,
+                              gemma_q4_full=gemma_q4_acc_full,
+                              gemma_q2_full=gemma_q2_acc_full)
     plot_accuracy_eval_cost(local_acc_full, qwen_q8_acc_full, qwen_q4_acc_full, PLOTS_DIR,
-                            qwen_q2_full=qwen_q2_acc_full, llama_q4_full=llama_q4_acc_full)
+                            qwen_q2_full=qwen_q2_acc_full,
+                            gemma_q8_full=gemma_q8_acc_full,
+                            gemma_q4_full=gemma_q4_acc_full,
+                            gemma_q2_full=gemma_q2_acc_full)
 
     print(f"\nAll plots saved to {PLOTS_DIR}")
 
