@@ -60,11 +60,19 @@ QWEN_Q2_MODEL      ?= $(QWEN_DIR)/$(QWEN_Q2_FILE)
 
 # Gemma 2 2B Instruct — second model family at three standard quants
 # (Q8_0 / Q4_K_M / Q2_K), mirroring Qwen's quant ladder so the bit-depth
-# vs accuracy story is symmetric across families.  GGUFs from bartowski
-# (Google does not ship GGUFs directly).  Reuses the upstream llama.cpp
-# build (qwen-build); Gemma-2 architecture is supported natively.
+# vs accuracy story is symmetric across families.  GGUFs from community
+# repos (Google does not ship GGUFs directly).  Reuses the upstream
+# llama.cpp build (qwen-build); Gemma-2 architecture is supported natively.
+#
+# Provider note: bartowski ships Q8_0 and Q4_K_M but NOT Q2_K for this
+# model — its lowest standard quant is Q3_K_L.  We source Q2_K from
+# second-state, which ships the full ladder with matching naming.
+# Q8_0 is calibration-free (byte-identical across providers); Q4_K_M
+# calibration differences between providers are small and dominated
+# by the imatrix asymmetry already present between Qwen and Gemma.
 GEMMA_DIR          ?= ../Models/Gemma
 GEMMA_REPO         := bartowski/gemma-2-2b-it-GGUF
+GEMMA_REPO_Q2      := second-state/gemma-2-2b-it-GGUF
 
 GEMMA_Q8_QUANT     := Q8_0
 GEMMA_Q8_FILE      := gemma-2-2b-it-$(GEMMA_Q8_QUANT).gguf
@@ -1089,7 +1097,7 @@ gemma-q4-verify:
 	"$(QWEN_CLI)" -m $(GEMMA_Q4_MODEL) -p "What is 2+2?" -n 32 -t $(THREADS) --single-turn
 
 gemma-q2-model:
-	hf download $(GEMMA_REPO) $(GEMMA_Q2_FILE) \
+	hf download $(GEMMA_REPO_Q2) $(GEMMA_Q2_FILE) \
 		--local-dir $(GEMMA_DIR)
 
 gemma-q2-verify:

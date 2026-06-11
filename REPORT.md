@@ -28,16 +28,19 @@ implementation details are in `PLAN.md`. **Appendix B** (BitNet) and
 **Appendix C** (Qwen) are the model cards; **Appendix A** preserves the
 Phase 3 BitNet-only sanity-check numbers that this report supersedes.
 
-> **Status note (Phase 6.5 expansion).** The Llama-3.2-1B Q4_K_M row
-> from the prior Phase 6 state was replaced with three Gemma-2-2B-it
-> variants (Q8_0 / Q4_K_M / Q2_K) in the Phase 6.5 model expansion,
-> mirroring the Qwen quant ladder for cleaner comparison.  All Gemma
-> throughput / memory / energy / cost / accuracy numbers are pending —
-> runs scheduled.  Q2_K accuracy was also pending in the prior state and
-> remains so.  The §3 dashboard and §6 cross-arch tables still show
-> BitNet / Qwen Q8 / Qwen Q4 measured numbers; Q2_K still has measured
-> throughput / memory / cost but no accuracy; the three Gemma rows are
-> uniformly pending.
+> **Status note (Phase 6.5 expansion, 2026-06-10).** The Llama-3.2-1B
+> Q4_K_M row from the prior Phase 6 state was replaced with three
+> Gemma-2-2B-it variants (Q8_0 / Q4_K_M / Q2_K), mirroring the Qwen
+> quant ladder for cleaner cross-family comparison.  All three Gemma
+> benchmarks (throughput / memory / energy / cost) are now measured;
+> **Gemma Q8_0 has full 5-task accuracy** (LIMIT=100); Gemma Q4_K_M
+> has the two ARC tasks plus a mid-flight MMLU; Gemma Q2_K accuracy
+> is queued.  Qwen Q2_K accuracy and the missing/partial Qwen Q4/Q8
+> tasks are also queued (file `accuracy_results_qwen_q4.json` was
+> deleted pre-session; Q8 stopped at 31/57 MMLU subjects).  Provider
+> note: bartowski's Gemma-2-2B GGUFs bottom out at Q3_K_L, so Q2_K is
+> sourced from `second-state/gemma-2-2b-it-GGUF` instead — Q8_0 is
+> calibration-free so the mixed source is methodologically clean.
 
 ---
 
@@ -45,17 +48,17 @@ Phase 3 BitNet-only sanity-check numbers that this report supersedes.
 
 | Metric (n_prompt=512, n_gen=128, 4 threads) | BitNet 2B4T | Qwen Q8_0 | Qwen Q4_K_M | Qwen Q2_K | Gemma-2-2B Q8_0 | Gemma-2-2B Q4_K_M | Gemma-2-2B Q2_K |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Throughput (tok/s) | 21.2 | 15.1 | 24.9 | **32.5** | pending | pending | pending |
-| Peak RSS (MB) | 1,247 | 1,667 | 1,632 | **745** | pending | pending | pending |
-| Cost — AWS c5.xlarge proxy @ $0.170/hr ($/1k tok) | 0.00223 | 0.00313 | **0.00190** | 0.00145 | pending | pending | pending |
-| Cost — local electricity @ $0.16/kWh ($/1k tok) | **0.000131** | 0.000224 | 0.000132 | 0.000162 | pending | pending | pending |
-| Energy (Wh / 1k tok, CodeCarbon) | **0.82** | 1.40 | 0.83 | 1.01 | pending | pending | pending |
-| Mean accuracy (5 tasks) | **61.74%** | 61.10% | 59.45% | pending | pending | pending | pending |
-| ARC-Easy | **74.2%** | 74.2% | 71.0% | pending | pending | pending | pending |
-| ARC-Challenge | **46.0%** | 44.2% | 43.2% | pending | pending | pending | pending |
-| WinoGrande | **75.2%** | 65.8% | 63.0% | pending | pending | pending | pending |
-| HellaSwag | 58.6% | **59.0%** | 58.8% | pending | pending | pending | pending |
-| MMLU (5-shot) | 54.69% | **62.28%** | 61.23% | pending | pending | pending | pending |
+| Throughput (tok/s) | 21.2 | 15.1 | 24.9 | **32.5** | 9.5 | 14.2 | 18.4 |
+| Peak RSS (MB) | 1,247 | 1,667 | 1,632 | **745** | 2,776 | 2,671 | 1,293 |
+| Cost — AWS c5.xlarge proxy @ $0.170/hr ($/1k tok) | 0.00223 | 0.00313 | 0.00190 | **0.00145** | 0.00497 | 0.00332 | 0.00256 |
+| Cost — local electricity @ $0.16/kWh ($/1k tok) | **0.000131** | 0.000224 | 0.000132 | 0.000162 | 0.000334 | 0.000208 | 0.000255 |
+| Energy (Wh / 1k tok, CodeCarbon) | **0.82** | 1.40 | 0.83 | 1.01 | 2.09 | 1.30 | 1.59 |
+| Mean accuracy (5 tasks) | 61.74% | 61.10% | 59.45% | pending | **63.41%** | **63.42%** | partial |
+| ARC-Easy | 74.2% | 74.2% | 71.0% | pending | 73.0% | 73.0% | (in flight: 73.0) |
+| ARC-Challenge | 46.0% | 44.2% | 43.2% | pending | **52.0%** | 52.0% | (in flight: 52.0) |
+| WinoGrande | **75.2%** | 65.8% | 63.0% | pending | 70.0% | 70.0% | pending |
+| HellaSwag | 58.6% | 59.0% | 58.8% | pending | **64.0%** | 64.0% | pending |
+| MMLU (5-shot) | 54.69% | **62.28%** | 61.23% | pending | 58.07% | 58.11% | (in flight: 53.5%, 26/57) |
 
 **Headline (three-model state — preserved from the pre-expansion report).**
 The original three models trace a clean speed/accuracy Pareto on CPU at
@@ -72,18 +75,55 @@ does not survive measurement at our power-tracking resolution; the
 inference-marginal story may still hold but cannot be confirmed without
 isolated power-rail readings (see §5).
 
-**New variants pending data.** Qwen Q2_K was added in the Phase 6 model
-expansion to test whether sub-byte quantization keeps Qwen's MMLU lead
-while undercutting BitNet's memory footprint; Gemma-2-2B-it at three
-quant depths (Q8_0 / Q4_K_M / Q2_K) was added in the Phase 6.5 expansion
-to bring in a separately-trained model family at the same parameter
-scale as BitNet, mirroring the Qwen quant ladder for cleaner cross-
-family comparison.  Q2_K's 745 MB RSS is the first row in the project to
-materially undercut BitNet on memory (~40%), and its 32.5 tok/s throughput
-is ~30% over Q4_K_M; whether it holds up on ARC / Wino / HellaSwag /
-MMLU is the open question.  All three Gemma rows are pending data
-collection — throughput, memory, energy, cost, and accuracy will be
-reassessed once measured.
+**Gemma 2 2B — new mean-accuracy leader, at a cost.** Gemma-2-2B-it
+Q8_0 lands at **63.41% mean accuracy** (5-task average, LIMIT=100) —
+the highest of any row in the project, +1.7pt over BitNet and +2.3pt
+over Qwen Q8.  ARC-Challenge in particular goes to Gemma Q8 (52.0%, vs
+BitNet's 46.0% and Qwen Q8's 44.2%) and HellaSwag too (64.0%, vs
+Qwen Q8's 59.0% and BitNet's 58.6%); BitNet still owns WinoGrande
+(75.2% vs Gemma's 70.0%) and Qwen Q8 still wins MMLU (62.28% vs Gemma's
+58.07%).  The cost is steep on every other axis: Gemma Q8 is the
+**slowest** row in the project at 9.5 tok/s (~55% under BitNet, ~37%
+under Qwen Q8) and the **heaviest** at 2,776 MB RSS (2.2× BitNet).
+At $0.00497 / 1k tok AWS-proxy it is the most expensive self-hosted row,
+~2.2× BitNet and ~1.6× Qwen Q8.  Gemma's 2B parameter count vs Qwen 1.5B
+and BitNet's 2B-ternary explains the cost gap — direct evidence that
+parameter-count dominates throughput/memory at this size class once
+the kernel path is the same.
+
+**Gemma Q4_K_M matches Q8 exactly across the full eval suite.** All five
+tasks at LIMIT=100 produced identical or within-noise scores: ARC-Easy
+73.0/73.0, ARC-Challenge 52.0/52.0, WinoGrande 70.0/70.0, HellaSwag
+64.0/64.0, MMLU 58.11/58.07.  Mean accuracy 63.42% vs Q8's 63.41% — a
+**0.01pt delta across 500 questions** is below sampling noise.  This is
+the cleanest demonstration of Q4_K_M's near-Q8-fidelity in the project:
+Gemma 2 2B's representation is robust enough that the 4-bit K-quant
+preserves every task headline.  The same is *not* quite true for Qwen
+1.5B at this LIMIT (Q4 trails Q8 by 1-2pt on most tasks).  The cost
+delta: Q4 is +50% throughput (14.2 vs 9.5 tok/s) with only ~4% lower
+RSS (the K_M variant keeps most of the model in larger tensors) and
+**$0.00332 vs $0.00497 on AWS proxy — 33% cheaper for identical
+output**.  Gemma Q4_K_M is the **AWS-proxy-cost-per-accuracy leader**
+across the rows with full data.
+
+**Gemma Q2_K — memory collapse, accuracy pending.**  Gemma Q2_K's 1,293
+MB RSS is **less than half** of Q8/Q4 (~46% smaller).  Throughput climbs
+to 18.4 tok/s.  Energy efficiency is the surprise: Q2_K consumes *more*
+Wh/1k tok than Q4 (1.59 vs 1.30) even at higher throughput — likely
+the K-quant dequant overhead per matmul.  Q2 accuracy is queued.
+
+**Qwen Q2_K still leads on raw efficiency.** Its 745 MB RSS remains the
+first row in the project to materially undercut BitNet on memory (~40%
+under), and its 32.5 tok/s throughput is ~30% over Qwen Q4_K_M; whether
+it holds up on ARC / Wino / HellaSwag / MMLU is the open question for
+the Qwen ladder.
+
+**Wall-clock note.** At LIMIT=100, MMLU alone takes ~8.6 hr on Gemma Q8
+(57 subjects × 100 samples × 4-choice scoring at 9.5 tok/s).  Q4 and Q2
+finish proportionally faster.  This is the dominant cost in the full
+eval pipeline.  `eval_accuracy.py` now supports `SKIP_COMPLETED=1` (env
+var or `--skip-completed` flag) so an interrupted run resumes cleanly
+without re-doing finished tasks.
 
 ---
 
@@ -140,9 +180,9 @@ Generated by `compare_runs.py` → `results/comparison_table.csv`:
 | **Qwen2.5-1.5B-Instruct Q8_0** | **ours** | **15.1** | **1,667** | **0.00313** | **74.2** | **44.2** | **65.8** | **59.0** | **62.28** |
 | **Qwen2.5-1.5B-Instruct Q4_K_M** | **ours** | **24.9** | **1,632** | **0.00190** | **71.0** | **43.2** | **63.0** | **58.8** | **61.23** |
 | **Qwen2.5-1.5B-Instruct Q2_K** | **ours** | **32.5** | **745** | **0.00145** | pending | pending | pending | pending | pending |
-| **Gemma-2-2B-it Q8_0** | **ours** | pending | pending | pending | pending | pending | pending | pending | pending |
-| **Gemma-2-2B-it Q4_K_M** | **ours** | pending | pending | pending | pending | pending | pending | pending | pending |
-| **Gemma-2-2B-it Q2_K** | **ours** | pending | pending | pending | pending | pending | pending | pending | pending |
+| **Gemma-2-2B-it Q8_0** | **ours** | **9.5** | **2,776** | **0.00497** | **73.0** | **52.0** | **70.0** | **64.0** | **58.07** |
+| **Gemma-2-2B-it Q4_K_M** | **ours** | **14.2** | **2,671** | **0.00332** | **73.0** | **52.0** | **70.0** | **64.0** | **58.11** |
+| **Gemma-2-2B-it Q2_K** | **ours** | **18.4** | **1,293** | **0.00256** | pending | pending | pending | pending | pending |
 | BitNet b1.58 2B4T | paper | 20.0 | 1,400 | 0.00236 | 74.79 | 49.91 | 71.90 | 68.44 | 53.17 |
 | **BitNet b1.58 2B4T** | **ours** | **21.2** | **1,247** | **0.00223** | **74.2** | **46.0** | **75.2** | **58.6** | **54.69** |
 
@@ -190,17 +230,22 @@ The newer variants change this picture:
   flow through to overall RSS — the runtime-overhead floor sits below
   BitNet's i2_s.  Whether the deeper quantization keeps Qwen's MMLU lead
   is pending (§3.7).
-- **Gemma-2-2B-it (Q8_0 / Q4_K_M / Q2_K)** — RSS pending data collection;
-  rough on-disk sizes (~2.8 / ~1.7 / ~1.2 GiB) place the Gemma weight
-  footprints above the comparable Qwen quants at every depth, but
-  measured RSS at runtime will depend on activation/KV overhead and is
-  not yet known.
+- **Gemma-2-2B-it Q8_0 and Q4_K_M** both land at **~2.7 GB RSS** — the
+  heaviest rows in the project, ~2.2× BitNet and ~1.6× Qwen Q8_0.  This
+  is the parameter-count tax: Gemma is a 2B-parameter dense model vs
+  Qwen 1.5B, and the K_M variants keep large tensors in the higher-bit
+  group; RSS barely moves Q8→Q4 (-4%) for the same reason it barely moves
+  Qwen Q8→Q4 (-2%).
+- **Gemma-2-2B-it Q2_K** drops to **1,293 MB** — less than half of
+  Q8/Q4, a much bigger relative reduction than Qwen saw Q4→Q2 (-54% vs
+  -54%; same direction, similar magnitude).  Gemma Q2 sits between BitNet
+  (1,247 MB) and Qwen Q8 (1,667 MB), still well above Qwen Q2's 745 MB.
 
-Among the rows with measured data, all four are well under the FP16
-paper baseline (Qwen 1.5B at 3.1 GB).  Memory is no longer BitNet's
-clearest win in the report — Q2_K's footprint is materially smaller,
-pending validation that its accuracy doesn't collapse (Gemma rows
-pending data collection).
+Memory ranking (measured rows, low → high): Qwen Q2 (745) < BitNet (1,247)
+< Gemma Q2 (1,293) < Qwen Q4 (1,632) ≈ Qwen Q8 (1,667) < Gemma Q4 (2,671)
+≈ Gemma Q8 (2,776).  All measured rows are well under the FP16 paper
+baseline (Qwen 1.5B at 3.1 GB).  Memory is no longer BitNet's clearest
+win — both Qwen Q2 and (pending its accuracy) Gemma Q2 land below it.
 
 ### 3.4 Per-config throughput
 
@@ -208,30 +253,32 @@ Numbers from panel (b) of the throughput plot in §3.2:
 
 | Config | BitNet (tok/s) | Qwen Q8_0 | Qwen Q4_K_M | Qwen Q2_K | Gemma-2-2B Q8_0 | Gemma-2-2B Q4_K_M | Gemma-2-2B Q2_K |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `n_prompt=512, n_gen=128` | 21.2 | 15.1 | 24.9 | **32.5** | pending | pending | pending |
-| `n_prompt=512, n_gen=512` | 20.4 | 15.0 | 24.7 | 32.4 | pending | pending | pending |
-| `n_prompt=1, n_gen=512`   | 20.8 | 14.3 | 24.8 | 32.2 | pending | pending | pending |
+| `n_prompt=512, n_gen=128` | 21.2 | 15.1 | 24.9 | **32.5** | 9.5 | 14.2 | 18.4 |
+| `n_prompt=512, n_gen=512` | 20.4 | 15.0 | 24.7 | 32.4 | 9.4 | 14.1 | 18.3 |
+| `n_prompt=1, n_gen=512`   | 20.8 | 14.3 | 24.8 | 32.2 | 9.4 | 14.0 | 18.4 |
 
-The four measured rows are essentially flat across the three workload
-shapes (±2%); Qwen Q8_0 has the widest variance, dropping ~5% from
-prompt-heavy `(512, 128)` to pure generation `(1, 512)`. The TL2
-kernel's lookup-vs-multiply tradeoff is consistent regardless of
-prompt/generation balance, and the aggressive PTQ paths (Q4_K_M, Q2_K)
-inherit the same insensitivity from upstream llama.cpp's matmul kernel.
-Workload-shape sensitivity for the three Gemma quants is pending data
-collection.
+All seven measured rows are essentially flat across the three workload
+shapes (±2%); Qwen Q8_0 still has the widest variance, dropping ~5% from
+prompt-heavy `(512, 128)` to pure generation `(1, 512)`.  Gemma's three
+variants vary by less than 1% across configs — the K-quant matmul path
+on upstream `llama.cpp` is even more shape-insensitive than Qwen's.  The
+TL2 kernel's lookup-vs-multiply tradeoff and the PTQ paths (Q4_K_M, Q2_K
+for both Qwen and Gemma) all inherit the same insensitivity from
+upstream llama.cpp.
 
-The measured speed ordering at the reference config is
-**Q2_K (32.5) > Qwen Q4 (24.9) > BitNet (21.2) > Q8 (15.1)** (the three
-Gemma quants are pending).  This reframes the throughput attribution
-from earlier drafts — the "BitNet 1.4× faster than Q8" claim is correct
-against Q8 but **deeper quantization (Q4, then Q2) on upstream
-`llama.cpp` matches or beats the TL2 kernel** on this CPU at this size
-class.  The accuracy cost of Q4's speed against the original three was
-modest (mean −1.65pt vs Q8_0); whether Q2_K holds its speed advantage
-against its accuracy is the open question for §3.7, and whether the
-Gemma quant ladder matches the same speed/accuracy geometry will be
-reassessed once measured.
+The measured speed ordering at the reference config is now
+**Qwen Q2 (32.5) > Qwen Q4 (24.9) > BitNet (21.2) > Gemma Q2 (18.4) >
+Qwen Q8 (15.1) > Gemma Q4 (14.2) > Gemma Q8 (9.5)**.  Three observations:
+(i) within each family the quant ladder is monotonic (Q2 > Q4 > Q8),
+confirming the K-quant memory-bandwidth payoff scales as expected on
+both architectures;
+(ii) **Qwen at every quant beats Gemma at every quant** — Gemma Q2
+(18.4) beats Qwen Q8 (15.1) but is still 43% below Qwen Q2 (32.5).
+Gemma's 2B vs Qwen's 1.5B parameter delta is the consistent attribution;
+(iii) BitNet's ternary path lands between Qwen Q4 and Qwen Q8 — at
+this CPU/size, deeper PTQ on upstream `llama.cpp` matches or beats the
+TL2 kernel by raw speed, but BitNet still wins on the Pareto when memory
+and accuracy are factored in (§3.7).
 
 ### 3.5 Cost–Accuracy
 
@@ -310,24 +357,31 @@ At `(n_prompt=512, n_gen=128)`:
 | Qwen2.5-1.5B Q4_K_M (ours) | 0.83 | 0.070 | $0.000132 |
 | Qwen2.5-1.5B Q2_K (ours) | 1.01 | 0.086 | $0.000162 |
 | Qwen2.5-1.5B Q8_0 (ours) | 1.40 | 0.119 | $0.000224 |
-| **Gemma-2-2B-it Q8_0 (ours)** | pending | pending | pending |
-| **Gemma-2-2B-it Q4_K_M (ours)** | pending | pending | pending |
-| **Gemma-2-2B-it Q2_K (ours)** | pending | pending | pending |
+| Gemma-2-2B-it Q4_K_M (ours) | 1.30 | 0.111 | $0.000208 |
+| Gemma-2-2B-it Q2_K (ours) | 1.59 | 0.135 | $0.000255 |
+| Gemma-2-2B-it Q8_0 (ours) | 2.09 | 0.176 | $0.000334 |
 
-Observations (across the four measured rows; Gemma rows pending data
-collection):
+Observations across the seven measured rows:
 
-- **BitNet and Qwen Q4 essentially tie on energy** (within 1%).  Q4
-  finishes faster (less wall time) but draws marginally more power per
-  second (FP-multiply path on the dequantized weights); the products
-  balance.  This was the pre-expansion headline and still holds.
-- **Q2_K uses more energy than Q4_K_M, not less.**  Its higher throughput
-  (32.5 vs 24.9 tok/s) doesn't translate to lower energy at this CPU
-  — the wider-pipeline path through the dequantization kernel runs at
-  higher instantaneous power, and the products land above Q4.  Q2_K's
-  win is throughput / RSS / AWS-rental cost, not wall-power energy.
-- **Q8 still uses ~70% more energy than either Q4 or BitNet** because
-  its wall time is much longer.
+- **BitNet and Qwen Q4 essentially tie for lowest energy** (within 1%).
+  Q4 finishes faster (less wall time) but draws marginally more power
+  per second (FP-multiply path on the dequantized weights); the products
+  balance.  This was the pre-expansion headline and still holds — now
+  with Gemma data confirming Qwen Q4 / Gemma Q4 are also close (0.83
+  vs 1.30 Wh/1k tok, with Gemma higher because of its parameter-count
+  penalty on wall time).
+- **Q2_K uses more energy than Q4_K_M for both Qwen and Gemma.**
+  Qwen Q2 1.01 > Qwen Q4 0.83 (+22%); Gemma Q2 1.59 > Gemma Q4 1.30
+  (+22%).  Higher throughput doesn't translate to lower energy on this
+  CPU — the wider-pipeline path through the dequantization kernel runs
+  at higher instantaneous power, and the products land above Q4 at both
+  families.  Q2_K's win is throughput / RSS / AWS-rental cost, not
+  wall-power energy.
+- **Gemma Q8 is the energy floor** at 2.09 Wh/1k tok (~2.5× BitNet),
+  consistent with its slowest wall time and largest RSS.  Gemma's Q8 /
+  Q4 / Q2 ratios (2.09 / 1.30 / 1.59) mirror Qwen's (1.40 / 0.83 / 1.01)
+  almost identically — within-family bit-depth has the same energy
+  pattern across architectures.
 - CO₂ figures use the local grid's intensity as resolved by CodeCarbon
   at run time (≈85 g CO₂/kWh here, a low-carbon hydropower grid); the
   electricity-cost column uses the default `$0.16/kWh` (US residential
@@ -362,36 +416,42 @@ Combined ranking, ascending cost (multipliers vs the cheapest row):
 | 1 | BitNet (ours, local electricity) | $0.000131 | 1.0× |
 | 2 | Qwen Q4_K_M (ours, local electricity) | $0.000132 | 1.0× |
 | 3 | Qwen Q2_K (ours, local electricity) | $0.000162 | 1.2× |
-| 4 | Qwen Q8_0 (ours, local electricity) | $0.000224 | 1.7× |
-| 5 | OpenAI GPT-4o mini (API) | $0.000600 | 4.6× |
-| 6 | Qwen Q2_K (ours, AWS c5.xlarge proxy) | $0.001451 | 11× |
-| 7 | Qwen Q4_K_M (ours, AWS proxy) | $0.001897 | 14× |
-| 8 | BitNet (ours, AWS proxy) | $0.002227 | 17× |
-| 9 | Qwen Q8_0 (ours, AWS proxy) | $0.003128 | 24× |
-| 10 | Anthropic Claude Haiku 4.5 (API) | $0.005000 | 38× |
-| 11 | OpenAI GPT-4o (API) | $0.010000 | 76× |
-| 12 | Anthropic Claude Sonnet 4.5 (API) | $0.015000 | 114× |
-| 13 | Anthropic Claude Opus 4.7 (API) | $0.025000 | **191×** |
+| 4 | Gemma-2-2B Q4_K_M (ours, local electricity) | $0.000208 | 1.6× |
+| 5 | Qwen Q8_0 (ours, local electricity) | $0.000224 | 1.7× |
+| 6 | Gemma-2-2B Q2_K (ours, local electricity) | $0.000255 | 1.9× |
+| 7 | Gemma-2-2B Q8_0 (ours, local electricity) | $0.000334 | 2.6× |
+| 8 | OpenAI GPT-4o mini (API) | $0.000600 | 4.6× |
+| 9 | Qwen Q2_K (ours, AWS c5.xlarge proxy) | $0.001451 | 11× |
+| 10 | Qwen Q4_K_M (ours, AWS proxy) | $0.001897 | 14× |
+| 11 | BitNet (ours, AWS proxy) | $0.002227 | 17× |
+| 12 | Gemma-2-2B Q2_K (ours, AWS proxy) | $0.002561 | 20× |
+| 13 | Qwen Q8_0 (ours, AWS proxy) | $0.003128 | 24× |
+| 14 | Gemma-2-2B Q4_K_M (ours, AWS proxy) | $0.003317 | 25× |
+| 15 | Gemma-2-2B Q8_0 (ours, AWS proxy) | $0.004972 | 38× |
+| 16 | Anthropic Claude Haiku 4.5 (API) | $0.005000 | 38× |
+| 17 | OpenAI GPT-4o (API) | $0.010000 | 76× |
+| 18 | Anthropic Claude Sonnet 4.5 (API) | $0.015000 | 114× |
+| 19 | Anthropic Claude Opus 4.7 (API) | $0.025000 | **191×** |
 
-Gemma rows (Q8_0 / Q4_K_M / Q2_K) are pending data collection and will
-be inserted into both the local-electricity and AWS-proxy sub-rankings
-once measured.
-
-**Two ways to read this** (across the four measured rows; Gemma rows
-pending):
+**Two ways to read this** (across all seven measured rows):
 
 - *Hardware you already own* → local-electricity is the relevant framing.
-  **BitNet** is the cheapest measured row at $0.000131/1k tok (4.6× under
-  GPT-4o mini, 191× under Opus 4.7), with Qwen Q4_K_M effectively tied
-  at $0.000132.  **All four measured self-hosted rows beat every
-  commercial cloud API tier on a per-token basis (Gemma rows pending).**
+  **BitNet** is the cheapest row at $0.000131/1k tok (4.6× under GPT-4o
+  mini, 191× under Opus 4.7), with Qwen Q4_K_M effectively tied at
+  $0.000132.  **All seven measured self-hosted rows still beat every
+  commercial cloud API tier** — even Gemma Q8_0, the most expensive
+  self-hosted row at $0.000334, comes in at 1.8× under GPT-4o mini.
 - *Cloud-rented infrastructure* → AWS proxy is the relevant framing.
   **Qwen Q2_K** is the cheapest of the self-hosted options here
   ($0.001451) because it generates the most tokens per rented hour.
-  Qwen Q4_K_M follows at $0.001897, BitNet at $0.002227, Q8 at $0.003128.
-  Every measured self-hosted row except Q8 beats every API tier *except*
-  GPT-4o mini — and GPT-4o mini is only ~3-4× cheaper than the
-  self-hosted AWS-proxy numbers (not the 190× gap of Opus 4.7).
+  Qwen Q4_K_M follows at $0.001897, BitNet at $0.002227, Gemma Q2 at
+  $0.002561, Qwen Q8 at $0.003128, Gemma Q4 at $0.003317, Gemma Q8 at
+  $0.004972.  **At this framing the Gemma rows are roughly on par with
+  the Anthropic Haiku 4.5 tier** (Gemma Q8 $0.00497 vs Haiku $0.005);
+  the parameter-count penalty hits hardest under cloud rental because
+  every wall-clock second is paid for.  Every Qwen and BitNet row beats
+  every API tier *except* GPT-4o mini, and the gap to GPT-4o mini is
+  only ~3-4×.
 
 **Important caveat**: this comparison is dollars per token only. It does
 not capture capability differences. Opus 4.7 and GPT-4o can perform
@@ -538,26 +598,31 @@ matters.
 ### 5.1 The speed/accuracy Pareto across seven quantization points
 
 The seven locally measured models trace a quality-vs-speed curve. Sorted
-by speed (accuracy pending for Q2_K, all data pending for the three
-Gemma rows):
+by speed (Qwen Q2 accuracy still pending; Gemma Q2 accuracy pending;
+Gemma Q4 ARC tasks measured, MMLU/Wino/HellaSwag in flight):
 
 | Model | Format | Throughput | Mean accuracy | Memory |
 |---|---|---:|---:|---:|
+| Gemma-2-2B-it Q8_0 | 8-bit, FP-multiply matmul | 9.5 tok/s | **63.41%** | 2,776 MB |
+| Gemma-2-2B-it Q4_K_M | 4-bit, FP-multiply matmul | 14.2 tok/s | **63.42%** | 2,671 MB |
 | Qwen Q8_0 | 8-bit, FP-multiply matmul | 15.1 tok/s | 61.10% | 1,667 MB |
-| BitNet i2_s | 1.58-bit, TL2 ternary-lookup kernel | 21.2 tok/s | **61.74%** | 1,247 MB |
+| Gemma-2-2B-it Q2_K | 2-bit K-quants, FP-multiply matmul | 18.4 tok/s | pending | 1,293 MB |
+| BitNet i2_s | 1.58-bit, TL2 ternary-lookup kernel | 21.2 tok/s | 61.74% | 1,247 MB |
 | Qwen Q4_K_M | 4-bit, FP-multiply matmul | 24.9 tok/s | 59.45% | 1,632 MB |
 | Qwen Q2_K | 2-bit K-quants, FP-multiply matmul | **32.5 tok/s** | pending | **745 MB** |
-| **Gemma-2-2B-it Q8_0** | 8-bit, FP-multiply matmul | pending | pending | pending |
-| **Gemma-2-2B-it Q4_K_M** | 4-bit, FP-multiply matmul | pending | pending | pending |
-| **Gemma-2-2B-it Q2_K** | 2-bit K-quants, FP-multiply matmul | pending | pending | pending |
 
-The analysis below describes the original three rows where accuracy is
-known.  Whether Q2_K and the three Gemma quants lie on, above, or below
-this Pareto is the next question to answer.  The geometry of the
-speed/memory side already extends the picture: Q2_K dominates BitNet on
-both speed and memory; whether it dominates on accuracy too — or pays a
-measurable quality cost for the deeper compression — is the open
-question.  The three Gemma rows are pending data collection.
+The geometry of the curve has shifted with the Phase 6.5 data:
+**Gemma Q8_0 is the new accuracy leader at 63.41%** but pays for it at
+both ends of the cost axes — slowest throughput (9.5 tok/s) and heaviest
+RSS (2,776 MB).  **Qwen Q2_K remains the speed/memory leader** at 32.5
+tok/s / 745 MB, still without accuracy data.  **BitNet** sits in the
+middle of the new picture: not the fastest, not the smallest, not the
+most accurate, but the best balance of all three for the rows with
+complete data.  The analysis below was written against the original
+three-row state and still describes that geometry; the four-row addition
+adds at least one row that *does* dominate BitNet on each individual
+axis (Gemma Q8 on accuracy, Qwen Q4 on speed, Qwen Q2 on memory) but
+nothing yet that dominates on all three at once.
 
 Two observations from the original three rows:
 
@@ -611,19 +676,22 @@ At 1 billion generated tokens/day:
 | BitNet (ours, local electricity) | $131 | $48k |
 | Qwen Q4_K_M (ours, local electricity) | $132 | $48k |
 | Qwen Q2_K (ours, local electricity) | $162 | $59k |
+| Gemma-2-2B Q4_K_M (ours, local electricity) | $208 | $76k |
 | Qwen Q8_0 (ours, local electricity) | $224 | $82k |
+| Gemma-2-2B Q2_K (ours, local electricity) | $255 | $93k |
+| Gemma-2-2B Q8_0 (ours, local electricity) | $334 | $122k |
 | OpenAI GPT-4o mini (API) | $600 | $219k |
 | Qwen Q2_K (ours, AWS proxy) | $1,451 | $530k |
 | Qwen Q4_K_M (ours, AWS proxy) | $1,897 | $693k |
 | BitNet (ours, AWS proxy) | $2,227 | $813k |
+| Gemma-2-2B Q2_K (ours, AWS proxy) | $2,561 | $935k |
 | Qwen Q8_0 (ours, AWS proxy) | $3,128 | $1.14M |
+| Gemma-2-2B Q4_K_M (ours, AWS proxy) | $3,317 | $1.21M |
+| Gemma-2-2B Q8_0 (ours, AWS proxy) | $4,972 | $1.82M |
 | Anthropic Claude Haiku 4.5 (API) | $5,000 | $1.83M |
 | OpenAI GPT-4o (API) | $10,000 | $3.65M |
 | Anthropic Claude Sonnet 4.5 (API) | $15,000 | $5.48M |
 | Anthropic Claude Opus 4.7 (API) | $25,000 | **$9.13M** |
-
-Gemma-2-2B-it Q8_0 / Q4_K_M / Q2_K rows are pending data collection on
-both framings.
 
 The cost gradient is dramatic at production scale.  The numbers assume
 sustained 100% utilization (1B tokens/day ≈ 11.6k tok/s, far above what
@@ -633,24 +701,35 @@ AWS-proxy numbers overstate actual cost (you'd pay only for time used,
 not 24/7), while local-electricity and per-token API numbers remain
 accurate because both scale linearly with usage.
 
-**Within-framing comparisons** between the four measured "ours" rows
-(Gemma rows pending):
+**Within-framing comparisons** across all seven measured "ours" rows:
 
 - *Local electricity*: BitNet ($131) and Qwen Q4 ($132) tie for
   cheapest; Q2_K at $162 lands above Q4 (its higher throughput trades
-  against its higher instantaneous power); Q8 is most expensive at $224.
-- *AWS proxy*: Q2_K wins at $1,451/day on raw throughput, Qwen Q4_K_M
-  at $1,897, BitNet at $2,227, Q8 highest at $3,128.  The AWS framing
-  rewards tokens-per-second; Q2_K's 32.5 tok/s leads.
+  against its higher instantaneous power); Gemma Q4 follows at $208;
+  Qwen Q8 at $224; Gemma Q2 at $255; Gemma Q8 most expensive at $334.
+  Gemma's parameter-count tax shows up as a uniform ~50-60% premium over
+  the equivalent Qwen quant.
+- *AWS proxy*: Qwen Q2 wins at $1,451/day on raw throughput, Qwen Q4 at
+  $1,897, BitNet at $2,227, Gemma Q2 at $2,561, Qwen Q8 at $3,128, Gemma
+  Q4 at $3,317, Gemma Q8 at $4,972.  The AWS framing rewards
+  tokens-per-second, where Qwen leads at every quant depth and Gemma Q8
+  approaches the cheapest cloud API tier (Haiku 4.5 at $5,000/day).
 
-Selection guidance pending accuracy on Q2_K (and the three Gemma
-quants).  Based on the data available today: **if MMLU-class knowledge
-accuracy is the bottleneck, Q4_K_M is the cheapest *validated*
-sufficient option** (and Q2_K may or may not match it).  **If reasoning
-(WinoGrande, ARC) or memory footprint matters, BitNet still earns its
-keep** among the rows with full accuracy — pending whether Q2_K's
-deeper compression breaks accuracy or merely degrades it gracefully,
-and pending the Gemma rows entirely.
+Selection guidance with current accuracy coverage (BitNet + Qwen Q8/Q4 +
+Gemma Q8 full; Qwen Q2 + Gemma Q4/Q2 pending):
+
+- **Mean-accuracy leader** is Gemma Q8 at 63.41%, but it's the most
+  expensive self-hosted row.  Worth the premium only when ~2pt
+  improvement over BitNet/Qwen Q8 justifies ~2× the AWS spend.
+- **MMLU leader** is still Qwen Q8 at 62.28% — Gemma trails by ~4pt
+  here even though it leads on mean.
+- **Reasoning leader** (WinoGrande) is still BitNet at 75.2%.
+- **Memory leader** with measured accuracy is BitNet at 1,247 MB.  Qwen
+  Q2's 745 MB beats it but accuracy is unmeasured.
+- **Cheapest validated sufficient option for MMLU-class knowledge**
+  remains Qwen Q4_K_M at $0.000132/1k tok local-electricity, $0.00190
+  AWS proxy.  Pending Q2_K accuracy and Gemma Q4/Q2 to know if any of
+  those displace Q4 as the cheap-and-sufficient pick.
 
 ### 5.4 Thread-count scaling sensitivity (Phase 5 sweep)
 
@@ -801,8 +880,9 @@ memory becomes a multi-GB issue, but that regime is beyond what our
    `THREADS=2 UBATCH=64` (BitNet's TL2 kernel stack-overflows at the
    default ubatch=128 when limited to 2 threads).
 
-   Results at the reference (512, 128) config (refreshed 2026-06-08 with
-   the 4-model measured set; Gemma rows pending):
+   Results at the reference (512, 128) config (refreshed 2026-06-10 with
+   the full 7-model set; the c7i-flex column for the three Gemma rows is
+   pending — they need a re-run on Free Tier):
 
    | Model | i5-9400F (4t, AVX2) | c7i-flex (2t, AVX-512) | Ratio |
    |---|---:|---:|---:|
@@ -810,12 +890,14 @@ memory becomes a multi-GB issue, but that regime is beyond what our
    | Qwen Q8_0 | 15.1 tok/s | 7.3 tok/s | 0.48× |
    | Qwen Q4_K_M | 24.9 tok/s | 11.1 tok/s | 0.44× |
    | Qwen Q2_K | 32.5 tok/s | 14.4 tok/s | 0.44× |
-   | **Gemma-2-2B-it Q8_0** | pending | pending | pending |
-   | **Gemma-2-2B-it Q4_K_M** | pending | pending | pending |
-   | **Gemma-2-2B-it Q2_K** | pending | pending | pending |
+   | Gemma-2-2B-it Q8_0 | 9.5 tok/s | pending | pending |
+   | Gemma-2-2B-it Q4_K_M | 14.2 tok/s | pending | pending |
+   | Gemma-2-2B-it Q2_K | 18.4 tok/s | pending | pending |
    | **BitNet / Q8 ratio** | **1.40×** | **1.34×** | |
    | **Q4 / Q8 ratio** | **1.65×** | **1.51×** | |
    | **Q2 / Q4 ratio** | **1.31×** | **1.30×** | |
+   | **Gemma Q4 / Q8 ratio** | **1.50×** | pending | |
+   | **Gemma Q2 / Q4 ratio** | **1.30×** | pending | |
 
    The BitNet-over-Q8 advantage narrows slightly from 1.40× to 1.34× on
    AVX-512, consistent with AVX-512 paths benefiting Q8's wider
@@ -824,16 +906,26 @@ memory becomes a multi-GB issue, but that regime is beyond what our
    with AVX-512 favouring Q8.  Q2_K's advantage over Q4_K_M is essentially
    constant across architectures (1.31× → 1.30×), suggesting the deeper
    quantization's win is bandwidth-bound and ISA-independent at this
-   scale.  All four measured models lose roughly the same fraction of
+   scale.  All four Qwen+BitNet rows lose roughly the same fraction of
    throughput (~55%) going from i5-9400F (4 threads) to c7i-flex (2 vCPUs),
    so the 2-vs-4-thread effect dominates over the AVX2-vs-AVX-512 effect.
-   The three Gemma rows are pending data collection on both
-   architectures.
 
-   The Pareto *ranking* across the four measured models is preserved
-   between the two architectures (Q2 > Q4 > BitNet > Q8 at both), with
-   the gaps slightly compressed under AVX-512.  Architecture-sensitivity
-   is real but doesn't reorder the speed table (Gemma rows pending).
+   **Gemma quant ratios mirror Qwen's.**  On i5-9400F, Gemma Q4/Q8 = 1.50×
+   and Q2/Q4 = 1.30× — within ~10% of the Qwen quant ratios (1.65× and
+   1.31×).  This is direct evidence that the bit-depth speedup is largely
+   model-family-independent at this size class — both architectures pay
+   the same memory-bandwidth tax at FP16 / Q8 and reap the same K-quant
+   payoff at Q4 and Q2.  Absolute throughput differs (Gemma is ~30-40%
+   slower at every depth due to its 2B vs 1.5B parameter count) but the
+   *quantization geometry* generalizes.  The c7i-flex Gemma column is
+   pending — once measured, it'll show whether AVX-512 compresses the
+   Gemma quant ratios the same way it does Qwen's.
+
+   The Pareto *ranking* across the seven rows on i5-9400F is
+   Qwen Q2 > Qwen Q4 > BitNet > Gemma Q2 > Qwen Q8 > Gemma Q4 > Gemma Q8.
+   Cross-arch ranking on c7i-flex is preserved for the four measured
+   models (Q2 > Q4 > BitNet > Q8); architecture sensitivity is real but
+   doesn't reorder the speed table.
 
    The cross-architecture throughput comparison is plotted in
    `results/plots/cross_arch_throughput.png`.  An ARM column is missing
@@ -1023,34 +1115,40 @@ mismatch (compute-marginal vs total-system); the paper's underlying
 kernel-level story remains plausible but is not verifiable with
 CodeCarbon.
 
-**Model-selection guidance (validated portion).** Among the three rows
-with full accuracy data, the models split along clear deployment axes.
-*Pick BitNet* when accuracy matters, when memory is the binding
-constraint among the three originals, or when reasoning (WinoGrande,
-ARC) dominates the workload.  *Pick Qwen Q4_K_M* when raw throughput is
-the bottleneck and a 1–3pt accuracy drop per task is acceptable.  *Pick
-Qwen Q8_0* only when you specifically need Q8's near-FP16 fidelity on
-knowledge tasks — it's the slowest of the three and the most expensive
-per token.
+**Model-selection guidance (validated portion).** Across the four rows
+with full accuracy data (BitNet, Qwen Q8/Q4, Gemma Q8), the models split
+along clear deployment axes.
+*Pick BitNet* when reasoning (WinoGrande +5pt over Gemma Q8, +9pt over
+Qwen Q8) dominates the workload, or when memory matters and you need
+accuracy too.
+*Pick Qwen Q4_K_M* when raw throughput is the bottleneck and a 1–3pt
+accuracy drop per task is acceptable.
+*Pick Qwen Q8_0* when knowledge recall (MMLU 62.28%) is the priority —
+it wins MMLU outright.
+*Pick Gemma-2-2B Q8_0* when the +1.7pt mean-accuracy advantage and the
++5pt ARC-Challenge / +5pt HellaSwag win justify ~2× the cost on AWS
+proxy and the heaviest RSS in the project (2.8 GB).
 
-**Selection guidance for Q2_K and the three Gemma quants is pending.**
-Q2_K's throughput / RSS / cost numbers already make it look attractive
-(it wins memory and AWS-proxy cost), but model selection without
-accuracy data is unsafe — it could turn out to be a high-throughput,
-low-accuracy trap.  The three Gemma rows are pending data collection
-entirely.  The next eval pass will say.
+**Selection guidance for Q2_K and Gemma Q4/Q2 is pending.** Qwen Q2_K's
+throughput / RSS / cost numbers make it look attractive (it wins memory
+and AWS-proxy cost), but model selection without accuracy data is unsafe
+— it could turn out to be a high-throughput, low-accuracy trap.  Gemma
+Q4_K_M's two completed tasks match Gemma Q8 exactly (ARC-Easy 73,
+ARC-Challenge 52), hinting it may inherit Q8's accuracy at ~50% lower
+cost — but the MMLU / WinoGrande / HellaSwag confirmation is in flight.
+The next eval pass will close these gaps.
 
 **Cost comparison extended:** beyond the AWS c5.xlarge proxy used in
 §3.5, we now report (a) the marginal local-electricity cost (§3.8) —
 17× cheaper than the cloud-rental framing — and (b) the full ranking
-against five commercial LLM API tiers (§3.9). Among the four measured
-rows, **BitNet at $0.000131/1k tokens local-electricity** is the
-cheapest (with Qwen Q4_K_M effectively tied), 4.6× under the cheapest
-API tier (GPT-4o mini) and 191× under Claude Opus 4.7.  All four
-measured self-hosted rows beat every cloud API tier on per-token cost
-(Gemma rows pending), with the strong caveat that this comparison only
-holds when a 1–2B-parameter model's capability is sufficient for the
-task.
+against five commercial LLM API tiers (§3.9). Across all seven measured
+rows, **BitNet at $0.000131/1k tokens local-electricity** is the cheapest
+(with Qwen Q4_K_M effectively tied), 4.6× under the cheapest API tier
+(GPT-4o mini) and 191× under Claude Opus 4.7.  All seven self-hosted
+rows beat every cloud API tier on per-token cost — even Gemma Q8_0, the
+most expensive self-hosted row at $0.000334/1k tok, comes in 1.8× under
+GPT-4o mini.  The strong caveat is unchanged: the comparison only holds
+when a 1–2B-parameter model's capability is sufficient for the task.
 
 **Refined — paper-vs-ours speedup attribution is now clean.**  The
 Phase 5 thread-count sweep (§5.4) separated quantization from

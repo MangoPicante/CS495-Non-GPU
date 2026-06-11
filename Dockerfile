@@ -123,8 +123,12 @@ RUN cd ${QWEN_DIR} && \
         qwen2.5-1.5b-instruct-q2_k.gguf \
         --local-dir .
 
-# Gemma 2 2B Instruct — second model family at Q8_0 / Q4_K_M / Q2_K
-# (community quants from bartowski; Google does not ship GGUFs).
+# Gemma 2 2B Instruct — second model family at Q8_0 / Q4_K_M / Q2_K.
+# Google does not ship GGUFs directly.  Q8 + Q4 come from bartowski (its
+# standard Gemma-2-2B ladder stops at Q3_K_L — no Q2_K available); Q2_K
+# comes from second-state, which ships the full ladder with matching
+# naming.  Q8_0 is calibration-free so the cross-provider source is a
+# non-issue; Q4_K_M calibration differences between providers are small.
 # Reuses the upstream llama.cpp build from §3 — no separate build needed.
 ENV GEMMA_DIR=/Models/Gemma
 RUN mkdir -p ${GEMMA_DIR} && \
@@ -132,6 +136,8 @@ RUN mkdir -p ${GEMMA_DIR} && \
     huggingface-cli download bartowski/gemma-2-2b-it-GGUF \
         gemma-2-2b-it-Q8_0.gguf \
         gemma-2-2b-it-Q4_K_M.gguf \
+        --local-dir . && \
+    huggingface-cli download second-state/gemma-2-2b-it-GGUF \
         gemma-2-2b-it-Q2_K.gguf \
         --local-dir .
 

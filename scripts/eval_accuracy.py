@@ -30,11 +30,23 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 
 import requests
+
+# The end-of-run summary table uses Δ (U+0394) for the "ours vs paper" gap
+# column.  Windows' default cp1252 stdout codec can't encode it and crashes
+# the whole script AFTER the per-task results were already saved to JSON,
+# which masks the data with a make-level non-zero exit.  Reconfigure once
+# so any non-ASCII in our prints degrades to '?' instead of raising.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, io.UnsupportedOperation):
+    pass
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = REPO_ROOT / "results" / "accuracy_results_bitnet.json"

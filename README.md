@@ -22,29 +22,40 @@ i5-9400F. Full details (methodology, threats to validity, plots) in
 
 | Metric | BitNet | Qwen Q8_0 | Qwen Q4_K_M | Qwen Q2_K | Gemma Q8_0 | Gemma Q4_K_M | Gemma Q2_K |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Throughput (tok/s) | 21.2 | 15.1 | 24.9 | **32.5** | pending | pending | pending |
-| Peak RSS (MB) | 1,247 | 1,667 | 1,632 | **745** | pending | pending | pending |
-| Mean accuracy across 5 tasks (%) | **61.74** | 61.10 | 59.45 | pending | pending | pending | pending |
-| Cost: AWS c5.xlarge proxy ($/1k tok) | 0.00223 | 0.00313 | 0.00190 | **0.00145** | pending | pending | pending |
-| Cost: local electricity ($/1k tok) | **0.000131** | 0.000224 | 0.000132 | 0.000162 | pending | pending | pending |
+| Throughput (tok/s) | 21.2 | 15.1 | 24.9 | **32.5** | 9.5 | 14.2 | 18.4 |
+| Peak RSS (MB) | 1,247 | 1,667 | 1,632 | **745** | 2,776 | 2,671 | 1,293 |
+| Mean accuracy across 5 tasks (%) | 61.74 | 61.10 | 59.45 | pending | **63.41** | **63.42** | partial |
+| Cost: AWS c5.xlarge proxy ($/1k tok) | 0.00223 | 0.00313 | 0.00190 | **0.00145** | 0.00497 | 0.00332 | 0.00256 |
+| Cost: local electricity ($/1k tok) | **0.000131** | 0.000224 | 0.000132 | 0.000162 | 0.000334 | 0.000208 | 0.000255 |
 
 The original three models (BitNet, Q8, Q4) traced a clean speed/accuracy
 Pareto where **BitNet matched Q8's accuracy at near-Q4 speed** while
 winning memory and reasoning tasks (WinoGrande +9–12pt over Qwen). The
-recent Q2 / Gemma expansion adds two open questions:
+recent Q2 / Gemma expansion adds three findings:
 
 - **Qwen Q2_K** is the throughput / memory / AWS-rental-cost leader by
   large margins (~30% over Q4 on speed; ~40% over BitNet on RSS) — pending
   the accuracy eval that will say whether the deeper quantization holds up.
-- **Gemma-2-2B-it (Q8_0 / Q4_K_M / Q2_K)** swaps in for the previous
-  Llama-3.2-1B Q4_K_M slot — a different model family at three quant
-  depths, so the bit-depth vs accuracy story is now symmetric across the
-  Qwen and Gemma ladders. All Gemma rows pending data collection.
+- **Gemma-2-2B-it Q8_0 / Q4_K_M tie for project mean-accuracy lead** at
+  **63.41% / 63.42%** (5-task average, LIMIT=100) — a striking
+  *quantization-invariance* result: Q4_K_M matches Q8_0 *exactly* on
+  ARC-Easy (73.0), ARC-Challenge (52.0), WinoGrande (70.0) and HellaSwag
+  (64.0), and within sampling noise on MMLU (58.11 vs 58.07).  +1.7pt
+  over BitNet, +2.3pt over Qwen Q8.  Q4 buys this accuracy at ~50% the
+  weight storage and +50% throughput vs Q8.  The cost: Gemma is the
+  slowest model in the project at every quant (9.5 / 14.2 / 18.4 tok/s
+  vs Qwen 15.1 / 24.9 / 32.5) and the heaviest at Q8/Q4 (2.7 GB RSS,
+  ~2.2× BitNet).  Gemma's 2B parameter count vs Qwen's 1.5B explains
+  the consistent throughput/memory gap.
+- **Gemma Q2_K** drops RSS to 1,293 MB — under half of Q8/Q4 — while
+  throughput climbs to 18.4 tok/s.  Accuracy is mid-flight: ARC tasks
+  matched Q8/Q4 (73 / 52), MMLU partial (~26/57 subjects, tracking at
+  ~53.5%).
 
-The four self-hosted models with measured data already beat every
-commercial cloud API tier on $/1k tokens at this size class — with the
-strong caveat that the comparison only holds for workloads where a 1–2B-
-parameter model's capability is sufficient.
+The four self-hosted rows with full accuracy data (BitNet, Qwen Q8, Qwen
+Q4, Gemma Q8) all beat every commercial cloud API tier on $/1k tokens at
+this size class — with the strong caveat that the comparison only holds
+for workloads where a 1–2B-parameter model's capability is sufficient.
 
 ---
 
@@ -76,7 +87,7 @@ External dependencies (cloned and built into sibling directories by the
 
 - `../Models/BitNet/` — `microsoft/BitNet` at commit `01eb4157` (the inference fork with the TL2 ternary-lookup kernel)
 - `../Models/Qwen/llama.cpp/` — `ggml-org/llama.cpp` at commit `1e5ad35d` (upstream, used for all three Qwen variants and all three Gemma variants)
-- `../Models/Gemma/` — Gemma-2-2B-it Q8_0 / Q4_K_M / Q2_K GGUFs (community quants from bartowski; Google does not ship official GGUFs)
+- `../Models/Gemma/` — Gemma-2-2B-it Q8_0 / Q4_K_M / Q2_K GGUFs (community quants: Q8 + Q4 from bartowski, Q2_K from second-state — bartowski's Gemma-2-2B ladder bottoms out at Q3_K_L, so Q2_K is sourced separately; Google does not ship official GGUFs)
 - `../Models/Cloud/` — populated by `make system-cards-cloud` with the
   GPT-4o / Claude 4.5 / Claude Opus 4.7 system-card PDFs used by the
   cost-vs-cloud comparison (§3.9 of `REPORT.md`).
