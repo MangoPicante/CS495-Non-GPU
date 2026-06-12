@@ -409,13 +409,13 @@ exit on any failure.
 | Model | Source | tok/s | Peak RSS | $/1k tok | ARC-E | ARC-C | Wino | HellaSwag | MMLU |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Qwen2.5 1.5B | paper (FP16) | 3.8 | 3,100 | $0.01243 | 79.92 | 52.82 | 66.61 | 70.95 | 61.11 |
-| **Qwen2.5-1.5B-Instruct Q8_0** | **ours** | **15.1** | **1,667** | **$0.00313** | **74.2** | **44.2** | **65.8** | **59.0** | **62.28** |
-| **Qwen2.5-1.5B-Instruct Q4_K_M** | **ours** | **24.9** | **1,632** | **$0.00190** | **71.0** | **43.2** | **63.0** | **58.8** | **61.23** |
-| **Qwen2.5-1.5B-Instruct Q2_K** | **ours** | **32.5** | **745** | **$0.00145** | pending | pending | pending | pending | pending |
+| **Qwen2.5-1.5B-Instruct Q8_0** | **ours** | **15.1** | **1,667** | **$0.00313** | **74.2** | **44.2** | **72.0** | **65.0** | **62.52** |
+| **Qwen2.5-1.5B-Instruct Q4_K_M** | **ours** | **24.9** | **1,632** | **$0.00190** | **72.0** | **48.0** | **69.0** | **58.0** | **62.28** |
+| **Qwen2.5-1.5B-Instruct Q2_K** | **ours** | **32.5** | **745** | **$0.00145** | **58.0** | **37.0** | **59.0** | **56.0** | **51.05** |
 | **Gemma-2-2B-it Q8_0** | **ours** | **9.5** | **2,776** | **$0.00497** | **73.0** | **52.0** | **70.0** | **64.0** | **58.07** |
-| **Gemma-2-2B-it Q4_K_M** | **ours** | **14.2** | **2,671** | **$0.00332** | **73.0** | **52.0** | **70.0** | **64.0** | **58.11** |
-| **Gemma-2-2B-it Q2_K** | **ours** | **18.4** | **1,293** | **$0.00256** | **73.0** | **52.0** | **70.0** | **64.0** | **58.09** |
-| **BitNet b1.58 2B4T** | **ours** | **21.2** | **1,247** | **$0.00223** | **74.2** | **46.0** | **75.2** | **58.6** | **54.69** |
+| **Gemma-2-2B-it Q4_K_M** | **ours** | **14.2** | **2,671** | **$0.00332** | **73.0** | **49.0** | **69.0** | **64.0** | **61.40** |
+| **Gemma-2-2B-it Q2_K** | **ours** | **18.4** | **1,293** | **$0.00256** | **67.0** | **46.0** | **67.0** | **58.0** | **51.93** |
+| **BitNet b1.58 2B4T** | **ours** | **21.2** | **1,247** | **$0.00223** | **74.4** | **46.2** | **75.2** | **58.4** | **54.51** |
 | BitNet b1.58 2B4T | paper | 20.0 | 1,400 | $0.00236 | 74.79 | 49.91 | 71.90 | 68.44 | 53.17 |
 
 Four earlier paper FP16 rows (LLaMA 3.2 1B, Gemma-3 1B, SmolLM2 1.7B,
@@ -433,30 +433,35 @@ WinoGrande by +9.4pt, Qwen Q8 wins MMLU by +7.6pt.  Qwen Q4_K_M lands at
 $0.00190 / 1k tokens — second-cheapest self-hosted row — at a −1pt
 average-accuracy cost relative to Q8.
 
-**All three Gemma-2-2B-it quants tie at 63.41–63.42% mean accuracy** —
-a striking *full-ladder quantization invariance* result.  Q8, Q4, and Q2
-score **identically** on ARC-Easy (73.0), ARC-Challenge (52.0),
-WinoGrande (70.0), HellaSwag (64.0); MMLU spread is 58.07 / 58.11 / 58.09
-— within 0.04pt across 5,700 questions.  All three rows lead the project
-by +1.7pt over BitNet and +2.3pt over Qwen Q8.  The Q2_K result is the
-surprise: ~2.6 bits per weight on Gemma 2 2B preserves the full task
-headline at this sample size, while Qwen 1.5B's Q4→Q8 transition costs
-1-2pt on most tasks.  Gemma 2 2B's representation is robust enough that
-the K-quants don't bite at this LIMIT.
+**Gemma 2 2B is dramatically more quantization-robust than Qwen 1.5B.**
+Gemma Q4_K_M (63.28% mean) matches Gemma Q8_0 (63.41%) within sampling
+noise — Q4 is essentially free.  Qwen Q4_K_M (61.86%) loses 1.72pt vs
+Qwen Q8_0 (63.58%) — small but real.  At Q2_K the gap widens further:
+Gemma Q2 loses 5.42pt from Q8 to 57.99%; Qwen Q2 *collapses* by 11.37pt
+to 52.21%, falling **below BitNet** and into near-random territory on
+the hardest tasks (ARC-Challenge 37%, MMLU 51%).  Larger parameter
+count plus family-specific K-quant calibration likely both contribute.
 
-**Gemma Q2_K becomes the new Pareto winner among rows with complete
-data.**  Ties on accuracy (63.42%), drops RSS to 1,293 MB (+4% over
-BitNet), and runs at 18.4 tok/s (-13% under BitNet's 21.2 — the only
-cost axis where Q2_K loses to BitNet).  At AWS-proxy $/1k-tok cost,
-Q2_K's $0.00256 sits ~16% above BitNet's $0.00223 but with +1.7pt mean
-accuracy.  If full-LIMIT confirms this invariance, **Gemma Q2_K is the
-default accuracy-priority self-hosting recommendation** at this size
-class.  BitNet retains the WinoGrande lead (75.2 vs Gemma 70.0); Qwen Q8
-retains MMLU (62.28 vs Gemma 58.07-58.11).  The cost: Gemma is slowest
-at every quant (9.5 / 14.2 / 18.4 tok/s vs Qwen 15.1 / 24.9 / 32.5) and
-heaviest at Q8/Q4 (~2.7 GB RSS, 2.2× BitNet) — the 2B vs 1.5B parameter
-count tax.  Q2_K's K-quant tensor sharing collapses the memory penalty
-even on the 2B-parameter base.
+**Pareto winner among rows with full accuracy data: Gemma Q4_K_M.**
+63.28% mean (essentially tied with Qwen Q8 at 63.58%, +1.5pt over
+BitNet) at 14.2 tok/s, 2,671 MB RSS, $0.00332 AWS proxy / $0.000208
+local electricity.  Best accuracy per dollar in the project.  BitNet
+retains the WinoGrande lead (75.2 vs Gemma 70.0); Qwen Q8 retains MMLU
+(62.52 vs Gemma 58.07).  The cost: Gemma is slowest at every quant
+(9.5 / 14.2 / 18.4 tok/s vs Qwen 15.1 / 24.9 / 32.5) and heaviest at
+Q8/Q4 (~2.7 GB RSS, 2.2× BitNet) — the 2B vs 1.5B parameter count tax.
+Q2_K's K-quant tensor sharing collapses Gemma's memory penalty to 1.3
+GB (within 4% of BitNet) — but at the 5.4pt accuracy cost noted above.
+
+**Methodology note.** The Q4/Q2 ARC/Wino/Hella numbers are at LIMIT=100
+samples each (±~1pt std error); MMLU for the re-run rows (Qwen Q4/Q2,
+Gemma Q2, Gemma Q4 re-verify) is at LIMIT=10 per subject = 570 total
+samples (±~2pt std error on the mean).  Gemma Q4/Q8 and Qwen Q8 still
+have their original 100/subject MMLU runs in addition.  Earlier
+committed data showing "Gemma full-ladder quantization invariance"
+(all three Gemma quants at 63.41-63.42%) was a casualty of a
+llama-server contamination bug — see the 2026-06-12 fix commit; only
+the Gemma Q4 ≈ Q8 portion of that story survives.
 
 **Qwen Q2_K** still leads on throughput / RSS / cost but lacks accuracy
 data.  Q2_K's 745 MB RSS is ~40% under BitNet's footprint, the
@@ -861,22 +866,24 @@ Tasks:
       level (~30-40% gap) — consistent with the 2B vs 1.5B parameter
       count difference.  Q2_K's RSS drops to less than half of Q8/Q4
       thanks to K-quant tensor sharing.
-- [x] Run accuracy evals for all three Gemma quants at LIMIT=100.
-      Wall-clock total ~33 hours (MMLU dominates — ~8.6 hr per model
-      regardless of quant since the script throughput floor is fixed).
-      **Striking result: all three Gemma quants land within 0.04pt mean
-      accuracy** (63.41 / 63.42 / 63.42).  ARC-Easy, ARC-Challenge,
-      WinoGrande, HellaSwag are *identical* across Q8/Q4/Q2; MMLU
-      spread is 58.07 / 58.11 / 58.09 — sampling noise.  Gemma Q2_K
-      becomes the new Pareto winner among rows with full accuracy —
-      ties on accuracy, +5pt mean over BitNet, 1.3 GB RSS (+4% over
-      BitNet), 18.4 tok/s (-13% under BitNet).  Workflow improvements:
-      `eval_accuracy.py` now reads `SKIP_COMPLETED=1` (env var or
-      `--skip-completed` flag) so resuming a crashed/interrupted run
-      skips finished tasks; also reconfigures stdout/stderr to UTF-8
-      on Windows so the end-of-run summary table (which uses `Δ` for
-      the ours-vs-paper gap column) doesn't crash on cp1252 terminals
-      after data is already saved.
+- [x] Run accuracy evals for all three Gemma quants and complete the
+      Qwen Q4/Q2 evals at LIMIT=100 + MMLU_LIMIT=10 (after a
+      first-attempt LIMIT=100 across-the-board run hit a llama-server
+      contamination bug on Windows that caused 4 of the 7 model
+      JSONs to record the wrong model's outputs — see the 2026-06-12
+      fix commit).  Final picture: Qwen Q8 leads at 63.58% mean, Gemma
+      Q4 ties effectively at 63.28%, Gemma Q8 at 63.41%, Qwen Q4 at
+      61.86%, BitNet at 61.74%, Gemma Q2 at 57.99%, Qwen Q2 at 52.21%.
+      The Gemma family is dramatically more quantization-robust than
+      Qwen (Q4 is essentially free on Gemma but costs 1.7pt on Qwen;
+      Q2 costs 5.4pt on Gemma but 11.4pt on Qwen).  Workflow
+      improvements landed in the same pass: `eval_accuracy.py` reads
+      `SKIP_COMPLETED=1` (env or flag) for crash recovery,
+      `MMLU_LIMIT` (env or flag) for the per-subject sampling knob,
+      reconfigures stdout to UTF-8 on Windows to avoid `Δ`-glyph
+      crashes after data save, and the new `_kill_port_holders` +
+      `_verify_loaded_model` defenses prevent the llama-server leak
+      class of bug from contaminating future runs.
 - [ ] Run Qwen Q2_K and re-run Qwen Q4 / Qwen Q8 (Q4 JSON was deleted
       pre-session; Q8 is partial at 31/57 MMLU subjects, no Wino/Hella).
       Queued after the Gemma evals finish — they contend for CPU and

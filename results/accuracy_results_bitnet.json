@@ -1,37 +1,63 @@
 {
+  "arc_easy": {
+    "accuracy": 74.4,
+    "correct": 372,
+    "total": 500,
+    "skipped": 0,
+    "elapsed_s": 6450.6,
+    "energy_kwh": 0.15357,
+    "co2_kg": 0.013015,
+    "paper_targets": {
+      "bitnet": 74.79,
+      "qwen": 79.92
+    }
+  },
+  "arc_challenge": {
+    "accuracy": 46.2,
+    "correct": 231,
+    "total": 500,
+    "skipped": 0,
+    "elapsed_s": 8513.3,
+    "energy_kwh": 0.199469,
+    "co2_kg": 0.016905,
+    "paper_targets": {
+      "bitnet": 49.91,
+      "qwen": 52.82
+    }
+  },
   "mmlu": {
-    "accuracy": 54.69,
-    "correct": 6301,
-    "total": 11521,
+    "accuracy": 54.51,
+    "correct": 6636,
+    "total": 12173,
     "subjects": {
       "abstract_algebra": {
-        "accuracy": 30.0,
-        "correct": 6,
-        "total": 20,
+        "accuracy": 39.0,
+        "correct": 39,
+        "total": 100,
         "skipped": 0
       },
       "anatomy": {
-        "accuracy": 45.0,
-        "correct": 9,
-        "total": 20,
+        "accuracy": 45.93,
+        "correct": 62,
+        "total": 135,
         "skipped": 0
       },
       "astronomy": {
-        "accuracy": 60.0,
-        "correct": 12,
-        "total": 20,
+        "accuracy": 59.87,
+        "correct": 91,
+        "total": 152,
         "skipped": 0
       },
       "business_ethics": {
-        "accuracy": 65.0,
-        "correct": 13,
-        "total": 20,
+        "accuracy": 48.0,
+        "correct": 48,
+        "total": 100,
         "skipped": 0
       },
       "clinical_knowledge": {
-        "accuracy": 65.0,
-        "correct": 13,
-        "total": 20,
+        "accuracy": 55.85,
+        "correct": 148,
+        "total": 265,
         "skipped": 0
       },
       "college_biology": {
@@ -347,49 +373,38 @@
         "skipped": 0
       }
     },
-    "elapsed_s": 14316.2,
-    "energy_kwh": 0.214736,
-    "co2_kg": 0.018199,
-    "paper_target": 53.17
-  },
-  "arc_easy": {
-    "accuracy": 74.2,
-    "correct": 371,
-    "total": 500,
-    "skipped": 0,
-    "elapsed_s": 1270.7,
-    "energy_kwh": 0.018971,
-    "co2_kg": 0.001608,
-    "paper_target": 74.79
-  },
-  "arc_challenge": {
-    "accuracy": 46.0,
-    "correct": 230,
-    "total": 500,
-    "skipped": 0,
-    "elapsed_s": 1656.4,
-    "energy_kwh": 0.024759,
-    "co2_kg": 0.002098,
-    "paper_target": 49.91
+    "elapsed_s": 27221.6,
+    "energy_kwh": 0.625256,
+    "co2_kg": 0.052991,
+    "paper_targets": {
+      "bitnet": 53.17,
+      "qwen": 61.11
+    }
   },
   "winogrande": {
     "accuracy": 75.2,
     "correct": 376,
     "total": 500,
     "skipped": 0,
-    "elapsed_s": 777.6,
-    "energy_kwh": 0.011574,
-    "co2_kg": 0.000981,
-    "paper_target": 71.9
+    "elapsed_s": 3861.6,
+    "energy_kwh": 0.089784,
+    "co2_kg": 0.007609,
+    "paper_targets": {
+      "bitnet": 71.9,
+      "qwen": 66.61
+    }
   },
   "hellaswag": {
-    "accuracy": 58.6,
-    "correct": 293,
+    "accuracy": 58.4,
+    "correct": 292,
     "total": 500,
     "skipped": 0,
-    "elapsed_s": 3563.4,
-    "energy_kwh": 0.053371,
-    "co2_kg": 0.004523,
-    "paper_target": 68.44
+    "elapsed_s": 18783.1,
+    "energy_kwh": 0.4369,
+    "co2_kg": 0.037028,
+    "paper_targets": {
+      "bitnet": 68.44,
+      "qwen": 70.95
+    }
   }
 }
