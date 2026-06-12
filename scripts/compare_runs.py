@@ -79,20 +79,40 @@ AWS_ON_DEMAND_RATES = {
 # --electricity-rate for industrial (~$0.10) or your local utility's rate.
 DEFAULT_ELECTRICITY_RATE = 0.16
 
-# Published FP16 baseline numbers from arXiv:2504.12285 Table 1.
-# Throughput condition: n_prompt=512, n_gen=128, single-thread x86 CPU.
-# Only families for which we also evaluate a locally-measured PTQ variant
-# are retained — keeps every FP16 paper row paired to one of our "ours"
-# rows for a clean before/after comparison:
+# Published FP16 baseline numbers.
+# Throughput condition for Qwen: n_prompt=512, n_gen=128, single-thread x86
+# CPU (arXiv:2504.12285 Table 1).  Only families for which we also
+# evaluate a locally-measured PTQ variant are retained — keeps every
+# FP16 paper row paired to one of our "ours" rows for a clean
+# before/after comparison:
 #   Qwen2.5 1.5B  paper FP16  ↔  Qwen2.5-1.5B-Instruct Q8_0/Q4_K_M/Q2_K (ours)
+#   Gemma 2 2B    paper PT    ↔  Gemma-2-2B-it Q8_0/Q4_K_M/Q2_K (ours)
 # Qwen2.5 1.5B is broken out separately (QWEN_PAPER below).
-# Gemma-2 2B does not appear in arXiv:2504.12285 Table 1, so the three
-# Gemma "ours" measurements (Q8_0/Q4_K_M/Q2_K) currently have no paired
-# FP16 paper baseline.  Add a GEMMA_PAPER block here once you've pulled
-# numbers from the Gemma 2 technical report (arXiv:2408.00118).
+# Gemma 2 2B paper numbers come from the official Hugging Face model card
+# (https://huggingface.co/google/gemma-2-2b) which mirrors the Gemma 2
+# technical report (arXiv:2408.00118) Table 6.  Numbers are for the
+# PRE-TRAINED BASE model (PT 2B), not the instruct -it variant — same
+# convention QWEN_PAPER uses.  Methodology asymmetry vs our setup
+# (worth noting when reading the gaps):
+#   * MMLU 5-shot — matches our setup exactly
+#   * ARC-Easy 0-shot — matches our setup exactly
+#   * WinoGrande partial-score — matches our partial-context scoring
+#   * ARC-Challenge 25-shot — WE use 0-shot, so paper inflates by ~6-10pt
+#   * HellaSwag 10-shot — WE use 0-shot, so paper inflates by ~3-5pt
+# CPU throughput / RSS for Gemma 2 2B are NOT reported in the Gemma
+# paper (it focuses on accuracy, not CPU inference cost), so left as
+# None — handled below as empty cells in the throughput/RSS/cost
+# columns of comparison_table.csv and skipped from cost/memory plots.
 # Gemma-3 1B, LLaMA 3.2 1B, SmolLM2 1.7B, MiniCPM 2B removed — no PTQ
 # counterpart in this study, so their rows were FP16-only and unactionable.
-OTHER_BASELINES = {}
+OTHER_BASELINES = {
+    "Gemma 2 2B (PT)": {
+        "throughput_tokens_s": None,
+        "peak_rss_mb": None,
+        "arc_easy": 80.1, "arc_challenge": 55.4,
+        "winogrande": 70.9, "hellaswag": 73.0, "mmlu": 51.3,
+    },
+}
 
 # BitNet b1.58 2B4T numbers as reported in arXiv:2504.12285
 BITNET_PAPER = {
@@ -405,14 +425,17 @@ def build_comparison_df(
     # the top and pushes BitNet to the bottom so the comparison reads
     # "literature numbers first, our measurements next, BitNet last".
     for name, b in OTHER_BASELINES.items():
+        tps = b.get("throughput_tokens_s")
+        rss = b.get("peak_rss_mb")
         rows.append({
             "model": name,
-            "source": "paper (FP16)",
-            "throughput_tokens_s": b["throughput_tokens_s"],
-            "peak_rss_mb": b["peak_rss_mb"],
-            "cost_per_1k_tokens": round(cost_per_1k(b["throughput_tokens_s"], hardware_rate), 6),
+            "source": "paper",
+            "throughput_tokens_s": tps if tps is not None else "",
+            "peak_rss_mb": rss if rss is not None else "",
+            "cost_per_1k_tokens": (round(cost_per_1k(tps, hardware_rate), 6)
+                                   if tps is not None else ""),
             # No CodeCarbon measurement for paper rows — would require running
-            # those FP16 baselines locally, which is outside this project's scope.
+            # those baselines locally, which is outside this project's scope.
             "energy_cost_per_1k_tokens": "",
             **{f: b[f] for f in ACC_FIELDS},
         })
@@ -580,8 +603,13 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
 
     # Other FP16 paper baselines (currently empty — kept for forward-compat).
     for m, paper in OTHER_BASELINES.items():
+        v = paper.get(metric_col)
+        if v is None:
+            # Paper baseline without throughput / RSS data — skip from
+            # this bar chart (it appears in accuracy plots instead).
+            continue
         labels.append(m)
-        values.append(paper[metric_col])
+        values.append(v)
         colors.append(OTHER_COLOR)
         hatches.append("")
 
@@ -1025,10 +1053,14 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path,
                  "(n_prompt=512, n_gen=128, CPU)")
     ax.set_xlim(0, max_val * 1.18)
     ax.invert_yaxis()
+    # Compact legend — full color-coded labels are redundant with the
+    # row labels on the left, so a tight legend lets the bars own the canvas.
     ax.legend(
         handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df,
                                 gemma_q8_df, gemma_q4_df, gemma_q2_df),
-        loc="lower right", fontsize=8,
+        loc="lower right", fontsize=6.5, frameon=True,
+        framealpha=0.85, handlelength=1.2, handletextpad=0.4,
+        labelspacing=0.25, borderpad=0.3, borderaxespad=0.3,
     )
     fig.tight_layout()
     path = out_dir / "memory_comparison.png"
@@ -1048,19 +1080,22 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
     task_labels = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
     task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
-    other_models = list(OTHER_BASELINES.keys())
-    # Column order: other FP16 papers (currently none) → Qwen paper FP16 →
-    # Qwen Q8/Q4/Q2 ours → Gemma 2 2B Q8/Q4/Q2 ours (no paper baseline) →
-    # BitNet ours → BitNet paper.  Each FP16 paper row sits next to its
-    # locally-measured quantized counterpart where one exists.
-    all_models = list(other_models)
-    all_models.append("Qwen2.5 1.5B\n(paper FP16)")
+    # Column order: Qwen paper FP16 → Qwen Q8/Q4/Q2 ours → Gemma 2 2B paper
+    # (PT base) → Gemma 2 2B Q8/Q4/Q2 ours → BitNet ours → BitNet paper.
+    # Each FP16 paper row sits next to its locally-measured quantized
+    # counterpart so the paper→ours delta reads visually adjacent.  Gemma
+    # paper comes from OTHER_BASELINES (currently the only entry there).
+    all_models = ["Qwen2.5 1.5B\n(paper FP16)"]
     if qwen_q8_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ8_0 (ours)")
     if qwen_q4_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ4_K_M (ours)")
     if qwen_q2_acc is not None:
         all_models.append("Qwen2.5-1.5B\nQ2_K (ours)")
+    # Slot the Gemma paper row directly above the Gemma ours rows.
+    other_models = list(OTHER_BASELINES.keys())
+    for m in other_models:
+        all_models.append(m.replace(" ", "\n", 1))
     if gemma_q8_acc is not None:
         all_models.append("Gemma-2-2B-it\nQ8_0 (ours)")
     if gemma_q4_acc is not None:
@@ -1076,14 +1111,15 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
 
     fig, ax = plt.subplots(figsize=(max(14, len(all_models) * 1.6), 6))
     for i, (task, label, color) in enumerate(zip(tasks, task_labels, task_colors)):
-        vals: list[float] = [OTHER_BASELINES[m][task] for m in other_models]
-        vals.append(QWEN_PAPER[task])
+        vals: list[float] = [QWEN_PAPER[task]]
         if qwen_q8_acc is not None:
             vals.append(qwen_q8_acc.get(task) or 0)
         if qwen_q4_acc is not None:
             vals.append(qwen_q4_acc.get(task) or 0)
         if qwen_q2_acc is not None:
             vals.append(qwen_q2_acc.get(task) or 0)
+        for m in other_models:
+            vals.append(OTHER_BASELINES[m][task])
         if gemma_q8_acc is not None:
             vals.append(gemma_q8_acc.get(task) or 0)
         if gemma_q4_acc is not None:
@@ -1909,6 +1945,17 @@ def plot_accuracy_eval_cost(
         print("Skipping accuracy eval cost plot: no elapsed_s data in accuracy JSONs.")
         return
 
+    # Different eval runs used different sample sizes (e.g. BitNet's
+    # original ARC/Wino/Hella ran at LIMIT=500, the rest at LIMIT=100;
+    # MMLU mixed LIMIT=100 and post-bugfix MMLU_LIMIT=10 reruns).  Scale
+    # every (model, task) bar to the canonical "100 samples per scoring
+    # invocation" so the totals are an apples-to-apples comparison of
+    # "what one full eval pass takes."  Per-subject for MMLU; per-task
+    # for the rest.  Detection comes straight from the recorded `total`
+    # field (or first subject's `total` for MMLU).
+    REF_SAMPLES = 100  # canonical samples per task (per-subject for MMLU)
+    any_scaled = False
+
     fig, ax = plt.subplots(figsize=(13, max(4, len(series) * 0.9 + 1.5)))
     y = np.arange(len(series))
 
@@ -1921,9 +1968,26 @@ def plot_accuracy_eval_cost(
         for _, _, full in series:
             info = full.get(task, {})
             h = info.get("elapsed_s")
-            hours.append(h / 3600.0 if h is not None else 0)
             e = info.get("energy_kwh")
-            kwh.append(e if e is not None else 0)
+            scale = 1.0
+            if task == "mmlu":
+                subs = info.get("subjects") or {}
+                if subs:
+                    sample_size = next(iter(subs.values())).get("total", REF_SAMPLES)
+                    if sample_size and sample_size != REF_SAMPLES:
+                        scale = REF_SAMPLES / sample_size
+                        any_scaled = True
+            else:
+                # Non-MMLU: scale by the task's total sample count.  Note
+                # `total` excludes skipped samples in the result dict, but
+                # for time/energy normalization we want sample count
+                # processed (total + skipped), which is what the eval ran.
+                processed = info.get("total", 0) + info.get("skipped", 0)
+                if processed and processed != REF_SAMPLES:
+                    scale = REF_SAMPLES / processed
+                    any_scaled = True
+            hours.append((h / 3600.0) * scale if h is not None else 0)
+            kwh.append((e * scale) if e is not None else 0)
         hours_arr = np.array(hours)
         kwh_arr = np.array(kwh)
         ax.barh(y, hours_arr, left=left_t, label=td, color=tc,
@@ -1958,9 +2022,15 @@ def plot_accuracy_eval_cost(
             f"Energy (kWh)  —  approx. via avg power ≈ {kwh_per_hour * 1000:.0f} W"
         )
 
+    scaled_note = (
+        f"\nNormalized to {REF_SAMPLES} samples per task (per-subject for MMLU) — "
+        "off-canonical runs scaled linearly for apples-to-apples comparison"
+        if any_scaled else ""
+    )
     ax.set_title(
         "Total Accuracy Evaluation Cost\n"
-        "(stacked by benchmark — ARC-Easy / ARC-Challenge / WinoGrande / HellaSwag / MMLU)",
+        "(stacked by benchmark — ARC-Easy / ARC-Challenge / WinoGrande / HellaSwag / MMLU)"
+        + scaled_note,
         loc="left",
     )
     fig.tight_layout()
