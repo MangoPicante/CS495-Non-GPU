@@ -71,25 +71,106 @@ def _find_server_bin(llama_dir: Path) -> Path:
     raise FileNotFoundError(f"llama-server not found in {llama_dir}/build")
 
 
+def _kill_port_holders(port: int) -> None:
+    """
+    Find and kill any process listening on `port`.  Defensive: a prior
+    invocation's llama-server may not have died from .terminate() on Windows
+    (TerminateProcess is async + llama-server doesn't always respond), leaving
+    the port held by a stale process loaded with the WRONG model.  If we
+    don't kill it, the new Popen below silently fails to bind (stderr is
+    DEVNULL), the health-poll succeeds against the stale server, and the
+    eval runs on the previously-loaded model while reporting the new one.
+    This contaminated four runs on 2026-06-11/12 (Gemma Q4/Q2 + Qwen Q4/Q2
+    all returned Gemma-Q4-shaped scores).
+    """
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            for c in proc.net_connections(kind="inet"):
+                if c.status == psutil.CONN_LISTEN and c.laddr.port == port:
+                    print(f"  [server] killing stale PID {proc.pid} "
+                          f"({proc.info['name']}) holding port {port}", flush=True)
+                    proc.kill()
+                    proc.wait(timeout=5)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
+            pass
+
+
+def _verify_loaded_model(server: str, expected: Path) -> bool:
+    """
+    Query /v1/models and assert the loaded model's id matches `expected`.
+    Defends against the leaked-server class of bug — if a stale server is
+    serving the WRONG model, the eval would silently report bogus numbers.
+    Returns True on match, False on mismatch (or if the endpoint is missing,
+    in which case we can't verify and assume the caller wants strict mode).
+    """
+    try:
+        models = requests.get(f"{server}/v1/models", timeout=10).json()
+        data = models.get("data", [])
+        if not data:
+            print(f"  [server] /v1/models returned no entries — cannot verify identity",
+                  flush=True)
+            return False
+        loaded_id = str(data[0].get("id", ""))
+        # llama.cpp's server returns the model id as the full path it was
+        # invoked with.  Compare by normalized absolute path (case-insensitive
+        # on Windows) and also accept basename-only matches as a fallback.
+        exp_abs = str(Path(expected).resolve()).lower()
+        got_abs = str(Path(loaded_id).resolve()).lower() if loaded_id else ""
+        if got_abs == exp_abs:
+            return True
+        if Path(loaded_id).name.lower() == Path(expected).name.lower():
+            return True
+        print(f"  [server] LOADED MODEL MISMATCH:\n"
+              f"           expected: {expected}\n"
+              f"           loaded:   {loaded_id}", flush=True)
+        return False
+    except Exception as e:
+        print(f"  [server] could not verify loaded model: {e}", flush=True)
+        return False
+
+
 def _start_server(llama_dir: Path, model: Path, threads: int, port: int,
                   ubatch: int = 128, ctx: int = 4096):
     global _server_proc
+    # Tear down any prior server we spawned in THIS process.  .kill() is
+    # unconditional (TerminateProcess on Windows / SIGKILL on Unix) — the
+    # earlier .terminate() was a soft request and llama-server didn't
+    # always respect it.
     if _server_proc is not None:
-        _server_proc.terminate()
         try:
-            _server_proc.wait(timeout=5)
-        except Exception:
             _server_proc.kill()
+            _server_proc.wait(timeout=10)
+        except Exception:
+            pass
+    # Also kill any stale llama-server from a PREVIOUS invocation (separate
+    # process tree, e.g. a prior `make eval-...` invocation that exited
+    # before its llama-server died).  See _kill_port_holders docstring.
+    _kill_port_holders(port)
     bin_path = _find_server_bin(llama_dir)
     cmd = [str(bin_path), "-m", str(model), "-c", str(ctx), "-t", str(threads),
            "-ub", str(ubatch),
            "-ngl", "0", "--host", "127.0.0.1", "--port", str(port), "-cb"]
     _server_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    url = f"http://127.0.0.1:{port}/health"
+    base = f"http://127.0.0.1:{port}"
+    health = f"{base}/health"
     for _ in range(40):
         time.sleep(2)
         try:
-            if requests.get(url, timeout=2).status_code == 200:
+            if requests.get(health, timeout=2).status_code == 200:
+                # Belt-and-suspenders: confirm the server we just reached is
+                # actually serving the model we asked for, not a leaked one
+                # holding the port.
+                if not _verify_loaded_model(base, model):
+                    print(f"  [server] identity check failed — aborting", flush=True)
+                    try:
+                        _server_proc.kill()
+                    except Exception:
+                        pass
+                    return False
                 return True
         except Exception:
             pass
