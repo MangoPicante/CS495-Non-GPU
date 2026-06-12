@@ -20,6 +20,15 @@ EVAL_UBATCH  ?= 64
 SKIP_COMPLETED ?=
 export SKIP_COMPLETED
 
+# `make eval-... MMLU_LIMIT=10` overrides --limit for MMLU only (per subject).
+# Useful when you want a precise read on ARC/Wino/Hella (LIMIT=100) but only
+# need a rough MMLU number — MMLU has 57 subjects so it costs ~10x wall time
+# vs all other tasks combined.  Empty default -> MMLU uses the global --limit.
+# Exported so the script picks it up via os.environ (same trick as
+# SKIP_COMPLETED — keeps the eval-mmlu-* recipes unchanged).
+MMLU_LIMIT ?=
+export MMLU_LIMIT
+
 # vswhere.exe ships with every VS 2017+ install at this fixed location.
 # It is used by check-deps to verify the ClangCL VS components are present.
 VSWHERE := C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe

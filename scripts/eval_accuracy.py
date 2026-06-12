@@ -1130,6 +1130,13 @@ def main():
                         help="Few-shot count (use 5 for MMLU)")
     parser.add_argument("--limit", type=int, default=None,
                         help="Max samples per task (None = full dataset)")
+    parser.add_argument("--mmlu-limit", type=int,
+                        default=int(os.environ["MMLU_LIMIT"]) if os.environ.get("MMLU_LIMIT", "").strip() else None,
+                        help="Override --limit for MMLU only (per subject). "
+                             "Useful when you want a precise read on ARC/Wino/Hella "
+                             "but only need a rough MMLU number — MMLU costs ~10x "
+                             "wall time vs the other tasks combined.  Defaults to "
+                             "--limit when unset (also reads MMLU_LIMIT from env).")
     parser.add_argument("--max-subjects", type=int, default=None,
                         help="Max MMLU subjects to evaluate (default: all 57)")
     parser.add_argument("--server", default="http://127.0.0.1:8080")
@@ -1196,7 +1203,11 @@ def main():
 
         for task in tasks_to_run:
             fewshot = args.num_fewshot if task == "mmlu" else 0
-            all_results[task] = run_task(task, args.server, fewshot, args.limit,
+            # MMLU has its own per-subject limit knob so the caller can keep
+            # other tasks at LIMIT=100 (for precise headline numbers) but
+            # drop MMLU per-subject sampling to ~10 (MMLU dominates wall time).
+            task_limit = args.mmlu_limit if (task == "mmlu" and args.mmlu_limit is not None) else args.limit
+            all_results[task] = run_task(task, args.server, fewshot, task_limit,
                                          max_subjects=args.max_subjects if task == "mmlu" else None,
                                          out=args.out, verbose=args.verbose,
                                          track_energy=not args.no_energy,
