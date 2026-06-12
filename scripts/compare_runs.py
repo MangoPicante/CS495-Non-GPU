@@ -839,19 +839,21 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
 
 def plot_thread_scaling(out_dir: Path):
     """
-    Throughput vs thread count for the three locally measured models at the
+    Throughput vs thread count for the seven locally measured models at the
     (n_prompt=512, n_gen=128) reference config.
 
-    Reads dedicated *_thread_sweep.csv files written by:
-      make benchmark-threads-bitnet
-      make benchmark-threads-qwen-q8
-      make benchmark-threads-qwen-q4
-    Skips silently when those files don't exist yet.
+    Reads dedicated *_thread_sweep.csv files written by
+    `make benchmark-threads-<model>` (per-model targets defined in the
+    Makefile).  Skips any model whose CSV doesn't exist.
     """
     sweeps = []
     for name, path, color in [
-        ("Qwen2.5-1.5B Q8_0",   Path("results/qwen_q8_thread_sweep.csv"),     QWEN_Q8_COLOR),
+        ("Qwen2.5-1.5B Q8_0",   Path("results/qwen_q8_thread_sweep.csv"),  QWEN_Q8_COLOR),
         ("Qwen2.5-1.5B Q4_K_M", Path("results/qwen_q4_thread_sweep.csv"),  QWEN_Q4_COLOR),
+        ("Qwen2.5-1.5B Q2_K",   Path("results/qwen_q2_thread_sweep.csv"),  QWEN_Q2_COLOR),
+        ("Gemma-2-2B-it Q8_0",  Path("results/gemma_q8_thread_sweep.csv"), GEMMA_Q8_COLOR),
+        ("Gemma-2-2B-it Q4_K_M", Path("results/gemma_q4_thread_sweep.csv"), GEMMA_Q4_COLOR),
+        ("Gemma-2-2B-it Q2_K",  Path("results/gemma_q2_thread_sweep.csv"), GEMMA_Q2_COLOR),
         ("BitNet b1.58 2B4T",   Path("results/bitnet_thread_sweep.csv"),   BITNET_COLOR),
     ]:
         if path.exists() and path.stat().st_size > 0:
