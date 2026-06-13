@@ -130,24 +130,43 @@ QWEN_PAPER = {
     "winogrande": 66.61, "hellaswag": 70.95, "mmlu": 61.11,
 }
 
-# Color convention used across all comparison plots:
-#   FP16 paper baselines   → blue   (Qwen FP16 paper grouped with the other FP16 papers)
-#   BitNet                 → orange (paper hatched, ours solid)
-#   Qwen Q8_0 (ours)       → green
-#   Qwen Q4_K_M (ours)     → purple
-#   Qwen Q2_K (ours)       → red    (deepest Qwen quantization)
-#   Gemma Q8_0 (ours)      → brown      (separate model family from Qwen)
-#   Gemma Q4_K_M (ours)    → light teal (Gemma's mid quantization)
-#   Gemma Q2_K (ours)      → dark teal  (deepest Gemma quantization)
-OTHER_COLOR     = "#4C72B0"
-BITNET_COLOR    = "#DD8452"
-QWEN_Q8_COLOR   = "#55A868"
-QWEN_Q4_COLOR   = "#8172B2"
-QWEN_Q2_COLOR   = "#C44E52"
-GEMMA_Q8_COLOR  = "#937860"
-GEMMA_Q4_COLOR  = "#64B5CD"
-GEMMA_Q2_COLOR  = "#2C7873"
-CLOUD_API_COLOR = "#7F7F7F"
+# Color convention used across all comparison plots — FAMILY-CODED.
+# Each model family gets its own hue; within a family, the shade darkens
+# as model size / faithfulness to the original increases (paper > Q8 > Q4
+# > Q2).  This lets a reader spot family at a glance and ranking-within-
+# family from the shade gradient.
+#
+#   BitNet     → orange family
+#       paper      → burnt orange (sienna)
+#       ours (i2_s)→ light orange (sandy)
+#   Qwen 1.5B  → blue family
+#       paper FP16 → deep navy
+#       Q8_0 ours  → medium blue (steel)
+#       Q4_K_M ours→ light blue
+#       Q2_K ours  → sky blue
+#   Gemma 2 2B → green family
+#       paper PT   → deep forest green
+#       Q8_0 ours  → dark green
+#       Q4_K_M ours→ medium green
+#       Q2_K ours  → light green
+#   Cloud APIs / generic fallback → neutral gray
+BITNET_PAPER_COLOR = "#A0522D"   # sienna / burnt orange
+BITNET_COLOR       = "#F4A460"   # sandy / light orange
+QWEN_PAPER_COLOR   = "#0D47A1"   # deep navy
+QWEN_Q8_COLOR      = "#1976D2"   # medium blue
+QWEN_Q4_COLOR      = "#42A5F5"   # light blue
+QWEN_Q2_COLOR      = "#90CAF9"   # sky blue
+GEMMA_PAPER_COLOR  = "#1B5E20"   # deep forest green
+GEMMA_Q8_COLOR     = "#388E3C"   # dark green
+GEMMA_Q4_COLOR     = "#66BB6A"   # medium green
+GEMMA_Q2_COLOR     = "#A5D6A7"   # light green
+CLOUD_API_COLOR    = "#7F7F7F"   # neutral gray
+# Back-compat alias: a few legacy code paths still reference OTHER_COLOR
+# as a generic FP16-baseline fallback when the specific family isn't
+# known.  Aliased to the deepest Qwen-paper navy so existing call sites
+# render in a family-consistent way; new code should prefer
+# QWEN_PAPER_COLOR / GEMMA_PAPER_COLOR / BITNET_PAPER_COLOR directly.
+OTHER_COLOR        = QWEN_PAPER_COLOR
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cross-architecture sources for `plot_cross_arch_throughput` (REPORT §6.1).
@@ -634,7 +653,7 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
     # ── BitNet ────────────────────────────────────────────────────────
     labels.append("BitNet b1.58 2B4T (paper)")
     values.append(BITNET_PAPER[metric_col])
-    colors.append(BITNET_COLOR)
+    colors.append(BITNET_PAPER_COLOR)
     hatches.append("///")
 
     if bitnet_local is not None:
@@ -644,11 +663,12 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         hatches.append("")
 
     # ── Qwen 1.5B ─────────────────────────────────────────────────────
-    # Paper FP16 row shares the OTHER_COLOR with other FP16 baselines so
-    # they collapse to one "FP16 baseline (paper)" legend entry.
+    # Paper FP16 row anchors the Qwen-family blue: paper is the deepest
+    # navy, Q8 / Q4 / Q2 walk down the family palette as quantization
+    # depth grows.
     labels.append("Qwen2.5 1.5B (paper FP16)")
     values.append(QWEN_PAPER[metric_col])
-    colors.append(OTHER_COLOR)
+    colors.append(QWEN_PAPER_COLOR)
     hatches.append("")
 
     q8_tps, q8_rss = _bench_row(qwen_q8_df) if qwen_q8_df is not None else (None, None)
@@ -678,13 +698,15 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
     # ── Gemma 2 2B ────────────────────────────────────────────────────
     # OTHER_BASELINES holds the Gemma 2 PT paper row; appears here only
     # if the paper baseline has the requested metric (throughput/RSS).
+    # Anchors the Gemma-family green palette in the same way Qwen FP16
+    # anchors the blue family above.
     for m, paper in OTHER_BASELINES.items():
         v = paper.get(metric_col)
         if v is None:
             continue
         labels.append(m)
         values.append(v)
-        colors.append(OTHER_COLOR)
+        colors.append(GEMMA_PAPER_COLOR)
         hatches.append("")
 
     g8_tps, g8_rss = _bench_row(gemma_q8_df) if gemma_q8_df is not None else (None, None)
@@ -720,11 +742,16 @@ def _legend_handles(qwen_q8_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | 
                     gemma_q4_df: pd.DataFrame | None = None,
                     gemma_q2_df: pd.DataFrame | None = None):
     from matplotlib.patches import Patch
-    # All FP16 papers (including Qwen2.5 1.5B) share a single legend entry so
-    # the legend doesn't double-count them as both "FP16 baseline" and
-    # standalone hatched series.
+    # Family-coded legend: BitNet (orange), Qwen (blue), Gemma (green)
+    # — each paper baseline is the darkest shade and each quant walks
+    # the family palette toward lighter as quantization deepens.
     handles = [
-        Patch(facecolor=OTHER_COLOR, edgecolor="#cccccc", label="FP16 baseline (paper)"),
+        Patch(facecolor=BITNET_PAPER_COLOR, hatch="///", edgecolor="#444444",
+              label="BitNet b1.58 2B4T (paper)"),
+        Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc",
+              label="BitNet b1.58 2B4T (ours)"),
+        Patch(facecolor=QWEN_PAPER_COLOR, edgecolor="#cccccc",
+              label="Qwen2.5 1.5B FP16 (paper)"),
     ]
     if qwen_q8_df is not None:
         handles.append(Patch(facecolor=QWEN_Q8_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q8_0 (ours)"))
@@ -732,16 +759,15 @@ def _legend_handles(qwen_q8_df: pd.DataFrame | None, qwen_q4_df: pd.DataFrame | 
         handles.append(Patch(facecolor=QWEN_Q4_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q4_K_M (ours)"))
     if qwen_q2_df is not None:
         handles.append(Patch(facecolor=QWEN_Q2_COLOR, edgecolor="#cccccc", label="Qwen2.5-1.5B Q2_K (ours)"))
+    if OTHER_BASELINES:
+        handles.append(Patch(facecolor=GEMMA_PAPER_COLOR, edgecolor="#cccccc",
+                             label="Gemma 2 2B PT (paper)"))
     if gemma_q8_df is not None:
         handles.append(Patch(facecolor=GEMMA_Q8_COLOR, edgecolor="#cccccc", label="Gemma-2-2B-it Q8_0 (ours)"))
     if gemma_q4_df is not None:
         handles.append(Patch(facecolor=GEMMA_Q4_COLOR, edgecolor="#cccccc", label="Gemma-2-2B-it Q4_K_M (ours)"))
     if gemma_q2_df is not None:
         handles.append(Patch(facecolor=GEMMA_Q2_COLOR, edgecolor="#cccccc", label="Gemma-2-2B-it Q2_K (ours)"))
-    handles += [
-        Patch(facecolor=BITNET_COLOR, edgecolor="#cccccc", label="BitNet b1.58 2B4T (ours)"),
-        Patch(facecolor=BITNET_COLOR, hatch="///", edgecolor="#444444", label="BitNet b1.58 2B4T (paper)"),
-    ]
     return handles
 
 
@@ -1326,12 +1352,13 @@ def _accuracy_scatter(
         is_gemma_q4_ours   = source == "ours" and model == GEMMA_Q4_OURS_NAME
         is_gemma_q2_ours   = source == "ours" and model == GEMMA_Q2_OURS_NAME
         is_ours = source == "ours"
-        # Qwen FP16 paper rows collapse into the generic "FP16 baseline (paper)"
-        # legend entry — same color, marker, label as the other paper FP16 rows.
+        # Family-coded scatter colors: Qwen FP16 paper uses the deepest
+        # Qwen-family navy, BitNet paper uses the deepest BitNet-family
+        # burnt orange — same gradient story as in plot_throughput.
         if source == "paper (FP16)":
-            color, label = OTHER_COLOR, "FP16 baseline (paper)"
+            color, label = QWEN_PAPER_COLOR, "Qwen2.5 1.5B FP16 (paper)"
         elif source == "paper":
-            color, label = BITNET_COLOR, "BitNet b1.58 2B4T (paper)"
+            color, label = BITNET_PAPER_COLOR, "BitNet b1.58 2B4T (paper)"
         elif is_qwen_q2_ours:
             color, label = QWEN_Q2_COLOR, "Qwen2.5-1.5B Q2_K (ours)"
         elif is_qwen_q4_ours:
