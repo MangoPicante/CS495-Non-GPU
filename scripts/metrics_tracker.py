@@ -71,11 +71,18 @@ CSV_FIELDS = [
     "co2_kg",
 ]
 
-# (n_prompt, n_gen) pairs matching arXiv:2504.12285 Table 1 conditions
+# (n_prompt, n_gen) pairs matching arXiv:2504.12285 Table 1 conditions.
+# Single config: (512, 128) matches every real serving workload at this size
+# class — chat with system prompts, RAG, code completion, document analysis,
+# accuracy evals all run in this regime.  Also matches the BitNet paper's
+# Table 1 reference config so paper→ours comparisons are apples-to-apples.
+# The (512, 512) "balanced long" and (1, 512) "pure generation" configs are
+# kept commented for re-enablement when workload-shape sensitivity is the
+# question being asked.
 BENCH_CONFIGS = [
     (512, 128),
-    (512, 512),
-    (1, 512),
+    # (512, 512),
+    # (1, 512),
 ]
 
 
