@@ -181,10 +181,17 @@ OTHER_COLOR        = QWEN_PAPER_COLOR
 # can outpace the AWS sweep — the plot grows bars as CSVs land.
 CROSS_ARCH_SOURCES = [
     # (label,                                     subdir,               color)
-    ("Windows / i5-9400F (AVX2)",                 None,                 "#4C72B0"),
-    ("Linux Docker / i5-9400F (AVX2)",            "linux_docker_x86",   "#7AAEDC"),
-    ("AWS c7i-flex.large (Intel AVX-512, 2v)",    "aws_c7i_flex_large", "#1F77B4"),
-    ("AWS t4g.small (ARM Graviton2, 2v)",         "aws_t4g_small",      "#2CA02C"),
+    # Cross-arch bars use a purple palette so they never collide with the
+    # family-coded model colors (BitNet orange / Qwen blue / Gemma green
+    # / cloud-API gray).  Shade walks darker → lighter from the most-
+    # authoritative reference (Windows native, the canonical bench host)
+    # to the more derivative architectures.  A gold accent reserved for
+    # ARM Graviton if/when that data ever lands — also distinct from
+    # every model-family hue.
+    ("Windows / i5-9400F (AVX2)",                 None,                 "#311B92"),
+    ("Linux Docker / i5-9400F (AVX2)",            "linux_docker_x86",   "#7E57C2"),
+    ("AWS c7i-flex.large (Intel AVX-512, 2v)",    "aws_c7i_flex_large", "#B39DDB"),
+    ("AWS t4g.small (ARM Graviton2, 2v)",         "aws_t4g_small",      "#FFB300"),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
