@@ -572,6 +572,38 @@ def write_comparison_csv(df: pd.DataFrame, out_path: Path) -> None:
     print(f"Saved {out_path}")
 
 
+# Canonical bar-chart order across every plot in the report:
+#   BitNet (paper → ours) → Qwen (paper → Q8 → Q4 → Q2 ours) →
+#   Gemma (paper → Q8 → Q4 → Q2 ours).
+# Within each family: paper baseline first, then quants from largest
+# (closest to FP16) to smallest (most aggressive PTQ).
+#
+# Each plot function expresses the same family layout: BitNet, Qwen,
+# Gemma in that order.  Plot helpers compute family-boundary indices
+# from the returned labels by detecting prefix transitions, so they
+# can draw a thin separator line between groups.
+
+_FAMILY_PREFIXES = ("BitNet", "Qwen", "Gemma")
+
+
+def _family_boundaries(labels: list[str]) -> list[int]:
+    """
+    Return the indices where a new model family starts (BitNet / Qwen / Gemma).
+    The first family transition is index 1 onward; index 0 (the first BitNet
+    row) is omitted since you don't want a separator at the very start.
+    Used by plotting code to add `axhline` / `axvline` separators between
+    families without each plot re-implementing the prefix detection.
+    """
+    out = []
+    last_family = None
+    for i, label in enumerate(labels):
+        fam = next((p for p in _FAMILY_PREFIXES if label.startswith(p)), None)
+        if fam != last_family and last_family is not None:
+            out.append(i)
+        last_family = fam
+    return out
+
+
 def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
                 qwen_q4_df: pd.DataFrame | None,
                 metric: str,
@@ -583,11 +615,9 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
     """
     Build the (labels, values, colors, hatches) tuple for a horizontal bar chart.
 
-    Order pairs each FP16 paper row with its quantized counterpart so the
-    paper→ours delta is visually adjacent:
-      Qwen 1.5B paper → Qwen Q8 → Q4 → Q2 ours →
-      Gemma 2 2B Q8 → Q4 → Q2 ours (no paper baseline) →
-      BitNet ours → BitNet paper.
+    Order: BitNet paper → BitNet ours → Qwen paper → Qwen Q8/Q4/Q2 ours →
+    [Gemma paper if present in OTHER_BASELINES] → Gemma Q8/Q4/Q2 ours.
+    Within each family: paper baseline first, then quants largest → smallest.
 
     Each "ours" row is conditional on local data existing.  `metric` selects
     which field to read from each paper dict / which bench column.
@@ -601,21 +631,21 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
     colors: list[str] = []
     hatches: list[str] = []
 
-    # Other FP16 paper baselines (currently empty — kept for forward-compat).
-    for m, paper in OTHER_BASELINES.items():
-        v = paper.get(metric_col)
-        if v is None:
-            # Paper baseline without throughput / RSS data — skip from
-            # this bar chart (it appears in accuracy plots instead).
-            continue
-        labels.append(m)
-        values.append(v)
-        colors.append(OTHER_COLOR)
+    # ── BitNet ────────────────────────────────────────────────────────
+    labels.append("BitNet b1.58 2B4T (paper)")
+    values.append(BITNET_PAPER[metric_col])
+    colors.append(BITNET_COLOR)
+    hatches.append("///")
+
+    if bitnet_local is not None:
+        labels.append("BitNet b1.58 2B4T (ours)")
+        values.append(bitnet_local)
+        colors.append(BITNET_COLOR)
         hatches.append("")
 
-    # Qwen 1.5B FP16 paper → Q8 → Q4 → Q2 (ours).  Qwen FP16 paper is rendered
-    # identically to the other FP16 baselines (same color, no hatch) so they
-    # collapse to a single "FP16 baseline (paper)" legend entry.
+    # ── Qwen 1.5B ─────────────────────────────────────────────────────
+    # Paper FP16 row shares the OTHER_COLOR with other FP16 baselines so
+    # they collapse to one "FP16 baseline (paper)" legend entry.
     labels.append("Qwen2.5 1.5B (paper FP16)")
     values.append(QWEN_PAPER[metric_col])
     colors.append(OTHER_COLOR)
@@ -645,8 +675,18 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         colors.append(QWEN_Q2_COLOR)
         hatches.append("")
 
-    # Gemma 2 2B Q8 → Q4 → Q2 (ours).  No paper FP16 row — arXiv:2504.12285
-    # doesn't include Gemma-2 2B in Table 1.
+    # ── Gemma 2 2B ────────────────────────────────────────────────────
+    # OTHER_BASELINES holds the Gemma 2 PT paper row; appears here only
+    # if the paper baseline has the requested metric (throughput/RSS).
+    for m, paper in OTHER_BASELINES.items():
+        v = paper.get(metric_col)
+        if v is None:
+            continue
+        labels.append(m)
+        values.append(v)
+        colors.append(OTHER_COLOR)
+        hatches.append("")
+
     g8_tps, g8_rss = _bench_row(gemma_q8_df) if gemma_q8_df is not None else (None, None)
     g8_val = g8_tps if metric_col == "throughput_tokens_s" else g8_rss
     if g8_val is not None:
@@ -670,17 +710,6 @@ def _bar_series(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         values.append(g2_val)
         colors.append(GEMMA_Q2_COLOR)
         hatches.append("")
-
-    if bitnet_local is not None:
-        labels.append("BitNet b1.58 2B4T (ours)")
-        values.append(bitnet_local)
-        colors.append(BITNET_COLOR)
-        hatches.append("")
-
-    labels.append("BitNet b1.58 2B4T (paper)")
-    values.append(BITNET_PAPER[metric_col])
-    colors.append(BITNET_COLOR)
-    hatches.append("///")
 
     return labels, values, colors, hatches
 
@@ -767,6 +796,10 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
     ax_main.set_title("(a) Cross-model comparison at n_prompt=512, n_gen=128", loc="left")
     ax_main.set_xlim(0, max_val * 1.15)
     ax_main.invert_yaxis()
+    # Family separators between BitNet / Qwen / Gemma groups.
+    for b in _family_boundaries(labels):
+        ax_main.axhline(b - 0.5, color="#888888", linewidth=0.8,
+                        linestyle="--", alpha=0.6)
     ax_main.legend(
         handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df,
                                 gemma_q8_df, gemma_q4_df, gemma_q2_df),
@@ -846,15 +879,18 @@ def plot_thread_scaling(out_dir: Path):
     `make benchmark-threads-<model>` (per-model targets defined in the
     Makefile).  Skips any model whose CSV doesn't exist.
     """
+    # Canonical legend order: BitNet → Qwen (largest → smallest quant) →
+    # Gemma (largest → smallest quant).  No paper rows on this plot since
+    # we have no thread-sweep data for any of the paper baselines.
     sweeps = []
     for name, path, color in [
-        ("Qwen2.5-1.5B Q8_0",   Path("results/qwen_q8_thread_sweep.csv"),  QWEN_Q8_COLOR),
-        ("Qwen2.5-1.5B Q4_K_M", Path("results/qwen_q4_thread_sweep.csv"),  QWEN_Q4_COLOR),
-        ("Qwen2.5-1.5B Q2_K",   Path("results/qwen_q2_thread_sweep.csv"),  QWEN_Q2_COLOR),
-        ("Gemma-2-2B-it Q8_0",  Path("results/gemma_q8_thread_sweep.csv"), GEMMA_Q8_COLOR),
+        ("BitNet b1.58 2B4T",    Path("results/bitnet_thread_sweep.csv"),   BITNET_COLOR),
+        ("Qwen2.5-1.5B Q8_0",    Path("results/qwen_q8_thread_sweep.csv"),  QWEN_Q8_COLOR),
+        ("Qwen2.5-1.5B Q4_K_M",  Path("results/qwen_q4_thread_sweep.csv"),  QWEN_Q4_COLOR),
+        ("Qwen2.5-1.5B Q2_K",    Path("results/qwen_q2_thread_sweep.csv"),  QWEN_Q2_COLOR),
+        ("Gemma-2-2B-it Q8_0",   Path("results/gemma_q8_thread_sweep.csv"), GEMMA_Q8_COLOR),
         ("Gemma-2-2B-it Q4_K_M", Path("results/gemma_q4_thread_sweep.csv"), GEMMA_Q4_COLOR),
-        ("Gemma-2-2B-it Q2_K",  Path("results/gemma_q2_thread_sweep.csv"), GEMMA_Q2_COLOR),
-        ("BitNet b1.58 2B4T",   Path("results/bitnet_thread_sweep.csv"),   BITNET_COLOR),
+        ("Gemma-2-2B-it Q2_K",   Path("results/gemma_q2_thread_sweep.csv"), GEMMA_Q2_COLOR),
     ]:
         if path.exists() and path.stat().st_size > 0:
             df = pd.read_csv(path)
@@ -1015,6 +1051,10 @@ def plot_cross_arch_throughput(out_dir: Path):
         "(higher is better; bars within each model = different CPU/OS combinations)"
     )
     ax.set_ylim(0, max_y * 1.18 if max_y else 1)
+    # Family separators between BitNet / Qwen / Gemma groups.
+    for b in _family_boundaries(models):
+        ax.axvline(b - 0.5, color="#888888", linewidth=0.8,
+                   linestyle="--", alpha=0.6)
     ax.legend(loc="upper left", fontsize=9)
     ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
@@ -1055,6 +1095,10 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path,
                  "(n_prompt=512, n_gen=128, CPU)")
     ax.set_xlim(0, max_val * 1.18)
     ax.invert_yaxis()
+    # Family separators between BitNet / Qwen / Gemma groups.
+    for b in _family_boundaries(labels):
+        ax.axhline(b - 0.5, color="#888888", linewidth=0.8,
+                   linestyle="--", alpha=0.6)
     # Compact legend — full color-coded labels are redundant with the
     # row labels on the left, so a tight legend lets the bars own the canvas.
     ax.legend(
@@ -1082,29 +1126,47 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
     task_labels = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
     task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
-    # Column order: Qwen paper FP16 → Qwen Q8/Q4/Q2 ours → Gemma 2 2B paper
-    # (PT base) → Gemma 2 2B Q8/Q4/Q2 ours → BitNet ours → BitNet paper.
-    # Each FP16 paper row sits next to its locally-measured quantized
-    # counterpart so the paper→ours delta reads visually adjacent.  Gemma
-    # paper comes from OTHER_BASELINES (currently the only entry there).
-    all_models = ["Qwen2.5 1.5B\n(paper FP16)"]
+    # Canonical column order across the report:
+    #   BitNet paper → BitNet ours →
+    #   Qwen paper FP16 → Qwen Q8 → Qwen Q4 → Qwen Q2 (ours) →
+    #   Gemma 2 2B paper (PT, from OTHER_BASELINES) → Gemma Q8/Q4/Q2 (ours).
+    # Within each family: paper baseline first, then quants largest → smallest.
+    # Family boundaries get a thin vertical separator so the BitNet / Qwen /
+    # Gemma groups read as visually distinct sections.
+    other_models = list(OTHER_BASELINES.keys())  # currently just Gemma 2 2B (PT)
+    columns: list[tuple[str, str, callable]] = []
+    columns.append(("BitNet b1.58 2B4T\n(paper)",
+                    "BitNet", lambda t: BITNET_PAPER[t]))
+    columns.append(("BitNet b1.58 2B4T\n(ours)",
+                    "BitNet", lambda t: local_acc.get(t) or 0))
+    columns.append(("Qwen2.5 1.5B\n(paper FP16)",
+                    "Qwen", lambda t: QWEN_PAPER[t]))
     if qwen_q8_acc is not None:
-        all_models.append("Qwen2.5-1.5B\nQ8_0 (ours)")
+        columns.append(("Qwen2.5-1.5B\nQ8_0 (ours)",
+                        "Qwen", lambda t: qwen_q8_acc.get(t) or 0))
     if qwen_q4_acc is not None:
-        all_models.append("Qwen2.5-1.5B\nQ4_K_M (ours)")
+        columns.append(("Qwen2.5-1.5B\nQ4_K_M (ours)",
+                        "Qwen", lambda t: qwen_q4_acc.get(t) or 0))
     if qwen_q2_acc is not None:
-        all_models.append("Qwen2.5-1.5B\nQ2_K (ours)")
-    # Slot the Gemma paper row directly above the Gemma ours rows.
-    other_models = list(OTHER_BASELINES.keys())
+        columns.append(("Qwen2.5-1.5B\nQ2_K (ours)",
+                        "Qwen", lambda t: qwen_q2_acc.get(t) or 0))
     for m in other_models:
-        all_models.append(m.replace(" ", "\n", 1))
+        # Snapshot m so the late-bound lambda doesn't pick up the loop var.
+        columns.append((m.replace(" ", "\n", 1),
+                        "Gemma", (lambda mm: lambda t: OTHER_BASELINES[mm][t])(m)))
     if gemma_q8_acc is not None:
-        all_models.append("Gemma-2-2B-it\nQ8_0 (ours)")
+        columns.append(("Gemma-2-2B-it\nQ8_0 (ours)",
+                        "Gemma", lambda t: gemma_q8_acc.get(t) or 0))
     if gemma_q4_acc is not None:
-        all_models.append("Gemma-2-2B-it\nQ4_K_M (ours)")
+        columns.append(("Gemma-2-2B-it\nQ4_K_M (ours)",
+                        "Gemma", lambda t: gemma_q4_acc.get(t) or 0))
     if gemma_q2_acc is not None:
-        all_models.append("Gemma-2-2B-it\nQ2_K (ours)")
-    all_models += ["BitNet b1.58 2B4T\n(ours)", "BitNet b1.58 2B4T\n(paper)"]
+        columns.append(("Gemma-2-2B-it\nQ2_K (ours)",
+                        "Gemma", lambda t: gemma_q2_acc.get(t) or 0))
+
+    all_models = [c[0] for c in columns]
+    column_families = [c[1] for c in columns]
+    column_value_fns = [c[2] for c in columns]
 
     x = np.arange(len(all_models))
     n_tasks = len(tasks)
@@ -1113,28 +1175,18 @@ def plot_accuracy(local_acc: dict, out_dir: Path,
 
     fig, ax = plt.subplots(figsize=(max(14, len(all_models) * 1.6), 6))
     for i, (task, label, color) in enumerate(zip(tasks, task_labels, task_colors)):
-        vals: list[float] = [QWEN_PAPER[task]]
-        if qwen_q8_acc is not None:
-            vals.append(qwen_q8_acc.get(task) or 0)
-        if qwen_q4_acc is not None:
-            vals.append(qwen_q4_acc.get(task) or 0)
-        if qwen_q2_acc is not None:
-            vals.append(qwen_q2_acc.get(task) or 0)
-        for m in other_models:
-            vals.append(OTHER_BASELINES[m][task])
-        if gemma_q8_acc is not None:
-            vals.append(gemma_q8_acc.get(task) or 0)
-        if gemma_q4_acc is not None:
-            vals.append(gemma_q4_acc.get(task) or 0)
-        if gemma_q2_acc is not None:
-            vals.append(gemma_q2_acc.get(task) or 0)
-        vals += [local_acc.get(task) or 0, BITNET_PAPER[task]]
+        vals = [fn(task) for fn in column_value_fns]
         ax.bar(x + offsets[i], vals, width, label=label, color=color)
 
     ax.set_xticks(x)
     ax.set_xticklabels(all_models, ha="center")
     ax.set_ylabel("Accuracy (%)")
     ax.set_ylim(0, 105)
+    # Family separators between BitNet / Qwen / Gemma groups.
+    for i in range(1, len(column_families)):
+        if column_families[i] != column_families[i - 1]:
+            ax.axvline(i - 0.5, color="#888888", linewidth=0.8,
+                       linestyle="--", alpha=0.6)
     ax.set_title(
         "Accuracy Comparison: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines\n"
         "(0-shot except MMLU 5-shot; WinoGrande & HellaSwag use continuation scoring)"
@@ -1372,7 +1424,10 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         print("Skipping energy/carbon plot: no energy_kwh data in benchmark CSVs.")
         return
 
+    # Canonical row order: BitNet → Qwen (Q8/Q4/Q2) → Gemma (Q8/Q4/Q2).
     rows: list[tuple[str, str, float | None, float | None]] = []
+    if bitnet_wh is not None:
+        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2))
     if qwen_q8_wh is not None:
         rows.append(("Qwen2.5-1.5B Q8_0 (ours)", QWEN_Q8_COLOR, qwen_q8_wh, qwen_q8_gco2))
     if qwen_q4_wh is not None:
@@ -1385,8 +1440,6 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
         rows.append(("Gemma-2-2B-it Q4_K_M (ours)", GEMMA_Q4_COLOR, gemma_q4_wh, gemma_q4_gco2))
     if gemma_q2_wh is not None:
         rows.append(("Gemma-2-2B-it Q2_K (ours)", GEMMA_Q2_COLOR, gemma_q2_wh, gemma_q2_gco2))
-    if bitnet_wh is not None:
-        rows.append(("BitNet b1.58 2B4T (ours)", BITNET_COLOR, bitnet_wh, bitnet_gco2))
 
     # Grid intensity (g CO₂ per Wh) is constant per location — derive from any
     # row with both metrics so the twin axis is an exact relabeling.  Average
@@ -1413,6 +1466,10 @@ def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
     ax.set_xlim(0, max_wh * 1.45)
     ax.set_xlabel("Energy per 1,000 tokens (Wh)")
     ax.grid(axis="x", alpha=0.3)
+    # Family separators between BitNet / Qwen / Gemma groups.
+    for b in _family_boundaries([r[0] for r in rows]):
+        ax.axhline(b - 0.5, color="#888888", linewidth=0.8,
+                   linestyle="--", alpha=0.6)
 
     if g_per_wh is not None:
         ax_c = ax.secondary_xaxis(
@@ -1453,15 +1510,18 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
     Cloud-API rows are taken from `CLOUD_API_PRICING` (output token rates).
     Log-x scale because prices span ~3 orders of magnitude.
     """
+    # Source order (BitNet → Qwen → Gemma) is irrelevant downstream — entries
+    # get sorted by cost before plotting — but kept in the canonical order so
+    # the code reads consistently with the rest of the report's plots.
     entries: list[tuple[str, float, str, str]] = []  # (label, cost, color, hatch)
     for name, df, color in [
+        ("BitNet b1.58 2B4T",    local_df,    BITNET_COLOR),
         ("Qwen2.5-1.5B Q8_0",    qwen_q8_df,  QWEN_Q8_COLOR),
         ("Qwen2.5-1.5B Q4_K_M",  qwen_q4_df,  QWEN_Q4_COLOR),
         ("Qwen2.5-1.5B Q2_K",    qwen_q2_df,  QWEN_Q2_COLOR),
         ("Gemma-2-2B-it Q8_0",   gemma_q8_df, GEMMA_Q8_COLOR),
         ("Gemma-2-2B-it Q4_K_M", gemma_q4_df, GEMMA_Q4_COLOR),
         ("Gemma-2-2B-it Q2_K",   gemma_q2_df, GEMMA_Q2_COLOR),
-        ("BitNet b1.58 2B4T",    local_df,    BITNET_COLOR),
     ]:
         if df is None or df.empty:
             continue
@@ -1636,8 +1696,12 @@ def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
     task_labels = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
     task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
+    # Canonical self-hosted order: BitNet → Qwen (Q8 → Q4 → Q2) →
+    # Gemma (Q8 → Q4 → Q2).  Cloud APIs appended below in pricing order.
     all_models: list[str] = []
     model_accs: dict[str, dict] = {}
+    label = "BitNet b1.58 2B4T\n(ours)"
+    all_models.append(label); model_accs[label] = local_acc
     if qwen_q8_acc is not None:
         label = "Qwen2.5-1.5B\nQ8_0 (ours)"
         all_models.append(label); model_accs[label] = qwen_q8_acc
@@ -1656,8 +1720,9 @@ def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
     if gemma_q2_acc is not None:
         label = "Gemma-2-2B-it\nQ2_K (ours)"
         all_models.append(label); model_accs[label] = gemma_q2_acc
-    label = "BitNet b1.58 2B4T\n(ours)"
-    all_models.append(label); model_accs[label] = local_acc
+    # Mark where the self-hosted block ends so the separator goes there
+    # rather than between Gemma rows.
+    self_hosted_end = len(all_models)
 
     for cloud_name in CLOUD_API_PRICING:
         if cloud_name not in CLOUD_API_ACCURACY:
@@ -1683,6 +1748,15 @@ def plot_cloud_accuracy_comparison(local_acc: dict, out_dir: Path,
     ax.set_xticklabels(all_models, ha="center")
     ax.set_ylabel("Accuracy (%)")
     ax.set_ylim(0, 105)
+    # Family separators between BitNet / Qwen / Gemma groups, plus a
+    # stronger separator at the self-hosted ↔ cloud boundary.
+    self_hosted_labels = all_models[:self_hosted_end]
+    for b in _family_boundaries(self_hosted_labels):
+        ax.axvline(b - 0.5, color="#888888", linewidth=0.8,
+                   linestyle="--", alpha=0.6)
+    if self_hosted_end < len(all_models):
+        ax.axvline(self_hosted_end - 0.5, color="#444444", linewidth=1.2,
+                   linestyle="-", alpha=0.8)
     ax.set_title(
         "Cloud-API vs Self-Hosted Accuracy\n"
         f"(self-hosted = our local Qwen / BitNet runs; cloud rows = each provider's "
@@ -1809,15 +1883,16 @@ def plot_mmlu_subject_heatmap(
 
     SPREAD_THRESHOLD = 15.0
 
+    # Canonical column order: BitNet → Qwen (Q8/Q4/Q2) → Gemma (Q8/Q4/Q2).
     models: list[tuple[str, dict]] = []
     for label, full in [
+        ("BitNet 2B4T",  bitnet_full),
         ("Qwen Q8_0",    qwen_q8_full),
         ("Qwen Q4_K_M",  qwen_q4_full),
         ("Qwen Q2_K",    qwen_q2_full),
         ("Gemma Q8_0",   gemma_q8_full),
         ("Gemma Q4_K_M", gemma_q4_full),
         ("Gemma Q2_K",   gemma_q2_full),
-        ("BitNet 2B4T",  bitnet_full),
     ]:
         if full is not None and "mmlu" in full and "subjects" in full["mmlu"]:
             models.append((label, full["mmlu"]["subjects"]))
@@ -1871,6 +1946,10 @@ def plot_mmlu_subject_heatmap(
     ax.set_yticklabels(display_names, fontsize=8)
     ax.xaxis.set_ticks_position("top")
     ax.xaxis.set_label_position("top")
+    # Family separators between BitNet / Qwen / Gemma columns.
+    for b in _family_boundaries([m[0] for m in models]):
+        ax.axvline(b - 0.5, color="white", linewidth=2.0,
+                   linestyle="-", alpha=0.95)
 
     for i in range(n_subj):
         for j in range(n_models):
@@ -1927,15 +2006,18 @@ def plot_accuracy_eval_cost(
     task_display = ["ARC-Easy", "ARC-Challenge", "WinoGrande", "HellaSwag", "MMLU"]
     task_colors = ["#4C72B0", "#55A868", "#8172B2", "#64B5CD", "#C44E52"]
 
+    # Canonical row order: BitNet → Qwen (largest → smallest quant) →
+    # Gemma (largest → smallest quant).  No paper rows on this plot since
+    # eval cost is by definition a measurement of OUR runs.
     series: list[tuple[str, str, dict]] = []
     for label, color, full in [
+        ("BitNet 2B4T",  BITNET_COLOR,   bitnet_full),
         ("Qwen Q8_0",    QWEN_Q8_COLOR,  qwen_q8_full),
         ("Qwen Q4_K_M",  QWEN_Q4_COLOR,  qwen_q4_full),
         ("Qwen Q2_K",    QWEN_Q2_COLOR,  qwen_q2_full),
         ("Gemma Q8_0",   GEMMA_Q8_COLOR, gemma_q8_full),
         ("Gemma Q4_K_M", GEMMA_Q4_COLOR, gemma_q4_full),
         ("Gemma Q2_K",   GEMMA_Q2_COLOR, gemma_q2_full),
-        ("BitNet 2B4T",  BITNET_COLOR,   bitnet_full),
     ]:
         if full is None:
             continue
@@ -2008,6 +2090,10 @@ def plot_accuracy_eval_cost(
         ax.text(h + max_h * 0.015, yi, f"{h:.1f} h   ·   {k:.3f} kWh",
                 va="center", fontsize=9, fontweight="bold")
     ax.grid(axis="x", alpha=0.3)
+    # Family separators between BitNet / Qwen / Gemma groups.
+    for b in _family_boundaries([s[0] for s in series]):
+        ax.axhline(b - 0.5, color="#888888", linewidth=0.8,
+                   linestyle="--", alpha=0.6)
     ax.legend(loc="lower right", fontsize=8, title="Benchmark")
 
     # Twin x-axis: avg kWh/hour ratio gives an approximate energy scale.
