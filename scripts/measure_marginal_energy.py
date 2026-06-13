@@ -100,6 +100,10 @@ def print_marginal_table(idle_power_W: float) -> None:
         ("BitNet",   ROOT / "results" / "bitnet_step_metrics.csv"),
         ("Qwen Q8",  ROOT / "results" / "qwen_q8_step_metrics.csv"),
         ("Qwen Q4",  ROOT / "results" / "qwen_q4_step_metrics.csv"),
+        ("Qwen Q2",  ROOT / "results" / "qwen_q2_step_metrics.csv"),
+        ("Gemma Q8", ROOT / "results" / "gemma_q8_step_metrics.csv"),
+        ("Gemma Q4", ROOT / "results" / "gemma_q4_step_metrics.csv"),
+        ("Gemma Q2", ROOT / "results" / "gemma_q2_step_metrics.csv"),
     ]
     print()
     print("=== Marginal J/tok per bench row ===")
