@@ -379,14 +379,14 @@ paired FP16 paper baseline yet), and writes:
      the locally-measured models with substantial cross-model spread
      (max−min ≥ 15pp), sorted by spread descending.
    - `cross_arch_throughput.png` — grouped bar chart of throughput at the
-     reference (512, 128) config across all seven models × all architectures
-     with data (Windows / i5-9400F AVX2, Linux Docker / i5-9400F AVX2,
-     AWS c7i-flex.large AVX-512, AWS t4g.small ARM).  Architectures and
-     models with no CSV under their subdir drop silently.
-   - `thread_scaling.png` — throughput vs thread count (1/2/4/6 threads) for
-     all three originally-measured models, with per-model linear-scaling
-     guides (REPORT §5.4).  Q2 and the three Gemma variants are not in the
-     thread sweep yet.
+     reference (512, 128) config across all seven models × all measured
+     x86 architectures (Windows / i5-9400F AVX2, Linux Docker / i5-9400F
+     AVX2, AWS c7i-flex.large AVX-512).  Architectures and models with
+     no CSV under their subdir drop silently.
+   - `thread_scaling.png` — throughput vs thread count (1/2/4/6 threads)
+     for all seven locally measured models, with per-model linear-scaling
+     guides (REPORT §5.4).  BitNet's 1-thread point is missing because
+     the TL2 kernel stack-overflows at threads=1 regardless of `-ub`.
 
    The cost– and memory–accuracy scatters share a single `_accuracy_scatter`
    helper so the hollow-vs-filled marker convention and dotted paper→ours
@@ -612,11 +612,12 @@ the comparison — there is no model-size scaling study to do.
 ### Phase 6 — Cross-Architecture Generalization Sweep
 
 Scope: convert the single-CPU threat-to-validity in REPORT.md §6.1
-into a measured result by re-running the benchmark suite on AWS instances
-spanning AVX-512 Intel, AVX2 AMD, and ARM Graviton.  Accuracy is
+into a measured result by re-running the benchmark suite on AWS
+x86 instances spanning AVX-512 Intel and AVX2 AMD.  Accuracy is
 hardware-independent at deterministic decoding so accuracy evals are not
 re-run; only `make benchmark` (throughput / memory / energy) executes on
-each remote instance.
+each remote instance.  ARM is out of scope — see the dropped-coverage
+note further down in this section.
 
 Instances and rationale:
 
@@ -624,7 +625,6 @@ Instances and rationale:
 |---|---:|---|---|---|
 | `c5.xlarge` | 4 | Skylake-SP Intel | AVX-512 | The AVX-512 hypothesis: do TL2 and Q8/Q4 AVX-512 paths shift the Pareto ranking? |
 | `c6a.xlarge` | 4 | AMD Zen 3 | AVX2 | Same-ISA-class AMD comparison vs the local i5-9400F (also AVX2) |
-| `c7g.xlarge` | 4 | Graviton3 ARM | Neon/SVE | Cross-ISA: does BitNet's TL2 kernel even compile on ARM, and if so where does it land? |
 | local i5-9400F | 4 | Coffee Lake Intel | AVX2 | Existing baseline (no AVX-512) |
 
 Use spot pricing for all three remote instances (~70% off on-demand);
@@ -903,12 +903,15 @@ Tasks:
       Q2_K and Gemma rows in the headline tables and accuracy comparisons;
       (c) the energy/carbon and accuracy-eval-cost plot layout changes
       (single panel with secondary x-axis instead of multi-panel grids).
-- [ ] (Optional) Retry ARM data on c7g.large or pre-build the ARM
-      image on a beefier instance and `docker save | ssh t4g 'docker
-      load'` so the benchmark runs on t4g.small but the build doesn't.
-      `CROSS_ARCH_SOURCES` keeps the `aws_t4g_small` entry so dropping
-      CSVs into `results/aws_t4g_small/` later lights up the ARM bars
-      without any code change.
+- ARM coverage dropped from project scope (2026-06-12).  The
+      `aws_t4g_small` attempt failed (OOM during build, see the second
+      t4g.small entry above), and the project's measurement story across
+      the i5-9400F + Linux Docker + AWS c7i-flex.large (AVX-512) + the
+      7-model thread sweep + the 7-model marginal-energy table is
+      already comprehensive enough to support the headline findings.
+      Code paths still tolerate ARM CSVs landing later
+      (`CROSS_ARCH_SOURCES` keeps an `aws_t4g_small` slot) so future
+      coverage is unblocked, but it is no longer a Phase 6 deliverable.
 
 Out of scope for Phase 6: re-running accuracy evals on remote instances
 (unchanged at deterministic decoding), GPU baselines (project is
@@ -921,8 +924,6 @@ Risks:
   Mitigation: smoke-test on `c5.xlarge` first; if blocked >1 day, drop
   BitNet from remote sweep and report Qwen Q8/Q4 cross-arch only (still
   closes most of the §6.1 threat).
-- ARM build of BitNet's TL2 kernel may not exist upstream.  Mitigation:
-  check before paying; treat ARM-Qwen-only as an acceptable fallback.
 - Spot interruption mid-benchmark.  Mitigation: each `(n_prompt, n_gen)`
   config writes one CSV row; re-running interrupted configs is cheap.
 - AWS cost overrun if smoke-test phase takes longer than expected.
