@@ -1375,6 +1375,29 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
     )
 
 
+def plot_speed_accuracy(df: pd.DataFrame, out_dir: Path):
+    """tg128 throughput vs mean accuracy at (512, 128).
+
+    The other axis-trade scatters (cost, memory) measure deployment
+    economics; this one isolates *raw inference speed against capability*,
+    making the speed-vs-accuracy Pareto visible without the cost / RSS
+    confound.  Useful for the §3.4 + §3.7 discussion: which model is on
+    the speed/accuracy frontier when everything else is set aside.
+    """
+    _accuracy_scatter(
+        df, out_dir,
+        x_col="throughput_tokens_s", y_metric="mean_acc",
+        x_label="Throughput tg128 (tokens/s) at n_prompt=512, n_gen=128",
+        y_label="Mean accuracy across 5 benchmarks (%)",
+        title="Speed–Accuracy Trade-off: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines\n"
+              "(throughput at the (512, 128) reference config;  "
+              "mean accuracy across ARC-E/ARC-C/Wino/HellaSwag/MMLU;  "
+              "hollow ○ = paper,  filled ♦ = ours)",
+        filename="speed_accuracy.png",
+        legend_loc="lower right",
+    )
+
+
 def plot_energy_carbon(local_df: pd.DataFrame, qwen_q8_df: pd.DataFrame | None,
                        out_dir: Path, qwen_q4_df: pd.DataFrame | None = None,
                        qwen_q2_df: pd.DataFrame | None = None,
@@ -2180,6 +2203,7 @@ def main():
                   gemma_q8_acc=gemma_q8_acc, gemma_q4_acc=gemma_q4_acc,
                   gemma_q2_acc=gemma_q2_acc)
     plot_cost_accuracy(comparison_df, PLOTS_DIR, args.hardware_rate)
+    plot_speed_accuracy(comparison_df, PLOTS_DIR)
     plot_energy_carbon(local_df, qwen_q8_df, PLOTS_DIR, qwen_q4_df,
                        qwen_q2_df=qwen_q2_df,
                        gemma_q8_df=gemma_q8_df, gemma_q4_df=gemma_q4_df,

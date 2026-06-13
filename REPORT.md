@@ -393,26 +393,50 @@ All three "ours" points sit at the lower-left corner — cheaper *and*
 higher mean accuracy than every paper FP16 baseline at this size class.
 Within the "ours" cluster:
 
-- **Qwen Q4_K_M** is the cheapest per token on the AWS-proxy framing
-  ($0.00190 / 1k tok), beating BitNet by ~15%.
-- **BitNet** is most accurate (mean 61.74%, +0.64 vs Q8, +2.29 vs Q4).
-- **Qwen Q8_0** is the most expensive of the three and sits in the
-  middle on accuracy — it has no obvious operational role unless you
-  specifically need Q8's near-FP16 fidelity on knowledge tasks (MMLU,
-  where it edges out Q4 by ~1pt).
+- **Qwen Q2_K** is the cheapest per token on the AWS-proxy framing
+  ($0.00232 / 1k tok), but its 52.21% mean accuracy makes it usable only
+  for low-stakes generation.
+- **BitNet** is the cheapest row with strong accuracy ($0.00266 AWS
+  proxy, 61.74% mean), within 1¢/1k tok of Qwen Q4.
+- **Qwen Q4_K_M** ($0.00269 AWS proxy, 61.86% mean) is essentially
+  tied with BitNet on the cluster and is the strongest choice when
+  prompt processing dominates (§3.4b).
+- **Gemma rows pay a ~2× cost premium** vs Qwen at every quant due to
+  the 2B vs 1.5B parameter delta — Gemma Q4 at $0.00507, Gemma Q8 at
+  $0.00591 is the most expensive self-hosted row in the project.
 
 MMLU is the only task where Qwen2.5 1.5B (paper FP16) is competitive on
 the accuracy axis — see `cloud_cost_accuracy.png` for the MMLU-specific
 view that also overlays the cloud APIs.
 
+### 3.5b Speed–Accuracy Pareto
+
+![tg128 throughput vs mean accuracy](results/plots/speed_accuracy.png)
+
+Same scatter mechanic as §3.5 but with **raw inference speed** on the
+x-axis instead of cost, so deployment economics drop out and the pure
+speed/accuracy Pareto is visible.  Pareto frontier (upper-right is
+better) runs Qwen Q4_K_M → BitNet → Qwen Q8 → Gemma Q4: each step
+sacrifices some throughput for a small accuracy gain.  Qwen Q2_K sits
+far off the frontier (high tg128, low accuracy); Gemma Q8/Q4 sit
+slightly off the frontier as well (high accuracy, low throughput —
+their 2B parameter count costs ~30-40% throughput vs Qwen at every
+quant).  **Qwen Q4_K_M dominates BitNet by a hair on tg128 (17.6 vs
+17.8 — statistical tie) and trails by ~2pt on mean accuracy**; the
+two are essentially co-located on this axis.  The Gemma family pays
+for its accuracy lead with a clear shift left.
+
 ### 3.6 Memory–Accuracy Pareto
 
 ![Memory vs mean accuracy](results/plots/memory_accuracy_pareto.png)
 
-BitNet (ours) defines the bottom-left frontier: ~1.25 GB RSS at 61.74%
-mean accuracy.  Both Qwen variants cluster at ~1.65 GB — Q8 slightly
-higher on accuracy (61.10%) than Q4 (59.45%) but on the same memory
-plateau.  No FP16 baseline gets close.
+BitNet (ours) defines the bottom-left frontier among rows with strong
+accuracy: 1,240 MB RSS at 61.74% mean accuracy.  Qwen Q2 (737 MB) sits
+to BitNet's left but at 52.21% mean accuracy — a memory win that
+sacrifices ~10pt of capability.  Qwen Q8/Q4 cluster at ~1.65 GB; the
+Gemma family pays a parameter-count tax (~2.7 GB at Q8/Q4, 1.28 GB at
+Q2) but tops the accuracy axis at Q4/Q8.  No FP16 paper baseline gets
+close on the memory axis.
 
 ### 3.7 Accuracy by task
 
@@ -420,28 +444,31 @@ plateau.  No FP16 baseline gets close.
 
 | Task | BitNet (ours) | Qwen Q8_0 (ours) | Qwen Q4_K_M (ours) | Winner |
 |---|---:|---:|---:|---|
-| ARC-Easy | 74.2 | 74.2 | 71.0 | BitNet / Q8 tie |
-| ARC-Challenge | **46.0** | 44.2 | 43.2 | BitNet |
-| WinoGrande | **75.2** | 65.8 | 63.0 | BitNet (+9.4 / +12.2) |
-| HellaSwag | 58.6 | **59.0** | 58.8 | Q8 (effectively tied) |
-| MMLU (5-shot) | 54.69 | **62.28** | 61.23 | Q8 (Q4 a close second) |
-| **Mean** | **61.74** | 61.10 | 59.45 |  |
+| ARC-Easy | **74.4** | 74.2 | 72.0 | BitNet (≈ tie with Q8) |
+| ARC-Challenge | 46.2 | 44.2 | **48.0** | Qwen Q4 |
+| WinoGrande | **75.2** | 72.0 | 69.0 | BitNet (+3.2 / +6.2) |
+| HellaSwag | 58.4 | **65.0** | 58.0 | Qwen Q8 (+6.6 over BitNet) |
+| MMLU (5-shot) | 54.51 | **62.52** | 62.28 | Qwen Q8 (Q4 within noise) |
+| **Mean** | 61.74 | **63.58** | 61.86 | Qwen Q8 |
 
 Two patterns:
 
-- **BitNet wins reasoning**, large.  WinoGrande +9.4pt over Q8 and
-  +12.2pt over Q4 is the cleanest BitNet win in the entire report.
-  ARC-Challenge +1.8pt over Q8 is the same direction.
-- **Qwen wins knowledge**, smaller.  MMLU is the only large-margin Qwen
-  win (+7.6pt over BitNet for Q8, +6.5pt for Q4).  This reflects
-  Qwen2.5's much larger pretraining corpus (up to 18T tokens vs BitNet
-  2B4T's 4T) — at this size class, MMLU is dominated by pretraining-data
-  breadth.
+- **BitNet wins reasoning.**  WinoGrande +3.2pt over Q8 and +6.2pt
+  over Q4 is the cleanest BitNet win in the entire report after the
+  2026-05-12 WinoGrande methodology fix (the pre-fix snapshot showed
+  +9.4 / +12.2 here but undermeasured Qwen's true scores).  BitNet
+  also nudges ARC-Easy (+0.2pt) and ARC-Challenge (+2.0pt) over Q8.
+- **Qwen wins knowledge.**  MMLU (+8.0pt over BitNet for Q8, +7.8pt
+  for Q4) and HellaSwag (+6.6pt for Q8) are the large-margin Qwen
+  wins.  This reflects Qwen2.5's much larger pretraining corpus (up to
+  18T tokens vs BitNet 2B4T's 4T) — at this size class, MMLU is
+  dominated by pretraining-data breadth.
 
-The Q8 → Q4 quantization cost is consistent across tasks: -3.2 (ARC-E),
--1.0 (ARC-C), -2.8 (Wino), -0.2 (HellaSwag), -1.05 (MMLU). Mean drop
-1.65pt.  No catastrophic failure on any task — Q4_K_M behaves as a
-"slightly worse but much faster" Q8.
+The Q8 → Q4 quantization cost is mixed across tasks: -2.2 (ARC-E),
++3.8 (ARC-C — Q4 actually wins here, possibly sampling noise on a
+100-sample task), -3.0 (Wino), -7.0 (HellaSwag), -0.24 (MMLU). Mean
+drop 1.72pt.  No catastrophic failure on any task — Q4_K_M behaves as
+a "slightly worse but much faster" Q8 in the Qwen family.
 
 ### 3.8 Energy, Carbon, and Local Electricity Cost
 
@@ -499,7 +526,7 @@ second is lower):
   utility rates. Absolute values are not portable across regions, but
   the inter-model ratios are.
 
-The electricity-cost framing is roughly **17× cheaper** than the AWS
+The electricity-cost framing is roughly **12× cheaper** than the AWS
 c5.xlarge proxy used elsewhere in the report. They answer different
 questions — see §2 Methodology and §3.9 for the framing comparison.
 
@@ -593,14 +620,19 @@ J/tok claims for FP16 baselines. The relevant paper numbers
 The paper's headline claim is therefore **9–23× energy efficiency** for
 BitNet vs FP16 baselines.
 
-Our CodeCarbon-measured J/tok, computed as
-`energy_kwh × 3,600,000 / (n_prompt + n_gen)`:
+Our CodeCarbon-measured J/tok at the single canonical config, computed
+as `energy_kwh × 3,600,000 / (n_prompt + n_gen)`.  Values are at the
+new bench condition THREADS=2 UBATCH=64; the older 3-config table
+(THREADS=4 with `(512, 128)` / `(512, 512)` / `(1, 512)` rows) was
+collapsed when the bench was reduced to a single config:
 
 | Workload | Tokens | BitNet J/tok | Qwen Q8_0 J/tok | Qwen Q4_K_M J/tok | Q8/BitNet |
 |---|---:|---:|---:|---:|---:|
-| `(512, 128)` | 640 | 2.94 | 5.05 | 2.98 | **1.72×** |
-| `(512, 512)` | 1,024 | 6.91 | 10.49 | 6.15 | 1.52× |
-| `(1, 512)` | 513 | 21.71 | 33.43 | 19.07 | 1.54× |
+| `(512, 128)` @ 2t | 640 | 4.53 | 7.63 | 4.88 | **1.68×** |
+
+For the other five rows (Qwen Q2, Gemma Q8/Q4/Q2): see the Wh/1k tok
+column in §3.8, which is the same quantity in different units (J/tok ×
+640 / 3,600 = Wh/1k tok at this token count).
 
 ### 4.1 Interpretation
 
@@ -651,11 +683,21 @@ same `CodeCarbon EmissionsTracker` used by `metrics_tracker.py` for a
 90-second window with no inference work, then subtracts that idle baseline
 × wall_time from every bench row.
 
-Measured idle baseline (i5-9400F, host-system as configured at measurement
-time — see caveats below): **1.37 Wh over 90.00 s → 54.81 W**.
+> **Stale-number note.** The marginal J/tok table below was computed
+> against the older THREADS=4 UBATCH=128 bench CSVs and the
+> `(512, 128)` / `(512, 512)` / `(1, 512)` three-config sweep that's
+> since been retired (§3.4).  The qualitative conclusions still hold
+> — BitNet's marginal is ~10× closer to the paper's 0.028 J/tok than
+> the total-system number suggests — but the absolute values would
+> shift if the table were recomputed against the new THREADS=2 single-
+> config bench.  Run `make marginal-energy` against the current CSVs
+> for a fresh snapshot.
+
+Measured idle baseline (i5-9400F, host-system as configured at
+measurement time — see caveats below): **1.37 Wh over 90.00 s → 54.81 W**.
 
 Applying `marginal_J = max(0, total_J − P_idle × wall_time)` to each
-bench row in `results/*_step_metrics.csv` gives:
+bench row in the previous THREADS=4 UBATCH=128 CSVs gave:
 
 | Model    | Config       | Wall    | Total J/tok | Idle J/tok | **Marginal J/tok** |
 |---|---|---:|---:|---:|---:|
@@ -854,13 +896,13 @@ Selection guidance with complete 7-model accuracy coverage:
   weak at 58.07%, perhaps a calibration artifact.
 - **Reasoning leader** (WinoGrande) is BitNet at 75.2%, with Qwen Q8
   second at 72.0%.
-- **Memory leader** with measured accuracy is Qwen Q2 at 745 MB — but
+- **Memory leader** with measured accuracy is Qwen Q2 at 737 MB — but
   its 52.21% mean accuracy is the worst of any measured row, ~10pt
   below BitNet, so the memory win comes with a real capability cost.
   BitNet (1,247 MB, 61.74% mean) is the smallest row that holds up on
   accuracy.
 - **Cheapest validated sufficient option for MMLU-class knowledge** is
-  Qwen Q4_K_M at $0.000132/1k tok local-electricity (62.28% MMLU,
+  Qwen Q4_K_M at $0.000217/1k tok local-electricity (62.28% MMLU,
   within noise of Q8's 62.52%).  Qwen Q2's $0.000162 is technically
   cheaper but drops MMLU to 51%.
 
