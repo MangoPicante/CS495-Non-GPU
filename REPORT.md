@@ -1101,20 +1101,30 @@ memory becomes a multi-GB issue, but that regime is beyond what our
    `results/plots/cross_arch_throughput.png`.  An ARM column is missing
    from the plot — see the ARM attempt note below.
 
-   **Linux-Docker-vs-Windows-native asymmetry on Q2_K.**
-   On BitNet / Q8 / Q4, Linux Docker (WSL2 backend, same i5-9400F) is
-   within ±10% of Windows native — sub-noise.  On **Q2_K**, Linux Docker
-   is **~30% *slower*** than Windows native (22.1 vs 32.5 tok/s).  Q2_K
-   was added in the Phase 6 model expansion and didn't exist when the
-   earlier Linux-Docker baseline was collected.  The asymmetry doesn't
-   reorder the Pareto (Windows native still leads) but it's an empirical
-   surprise worth noting: upstream `llama.cpp`'s Q2_K must exercise some
-   code path where WSL2's virtualization tax shows up (memory access
-   patterns, page faults, or `mmap` behaviour on the smaller weight
-   footprints — speculation pending profiling).  The c7i AVX-512 numbers
-   used in the table above come from a real Linux instance, not WSL2,
-   so they're unaffected.  The three Gemma rows' Linux-Docker behaviour
-   is pending data collection.
+   **Linux-Docker-vs-Windows-native penalty across all seven models.**
+   At the matched threads=2, ubatch=64 condition, Linux Docker (WSL2
+   backend, same i5-9400F) is **consistently slower than Windows native**
+   on every model — not "within noise" as an earlier threads=4 baseline
+   had suggested.  Ratios of Linux Docker vs Windows native tg128:
+
+   | Model      | Win native | Linux Docker | Docker / Win | Docker is slower by |
+   |------------|-----------:|-------------:|-------------:|--------------------:|
+   | BitNet     | 17.8       | 10.2         | 0.57×        | **43%**             |
+   | Qwen Q8_0  | 13.4       |  7.5         | 0.56×        | **44%**             |
+   | Qwen Q4_K_M| 17.6       | 12.5         | 0.71×        | 29%                 |
+   | Qwen Q2_K  | 20.3       | 13.9         | 0.68×        | 32%                 |
+   | Gemma Q8_0 |  8.0       |  5.3         | 0.66×        | 34%                 |
+   | Gemma Q4_K_M|  9.3      |  7.7         | 0.83×        | 17%                 |
+   | Gemma Q2_K | 11.7       | 10.1         | 0.86×        | 14%                 |
+
+   The Q8/BitNet end of the table loses ~40% of throughput to WSL2; the
+   smaller K-quants lose less (14–32%).  The Pareto *ranking* within the
+   Docker column is identical to the Windows-native ranking
+   (Qwen Q2 > Qwen Q4 > BitNet > Gemma Q2 > Qwen Q8 > Gemma Q4 > Gemma Q8),
+   so the §3 conclusions hold under Linux too — just at lower absolute
+   throughput.  The c7i AVX-512 numbers in the table above come from a
+   real Linux instance, not WSL2, so they're unaffected by this penalty;
+   they isolate the AVX-512-vs-AVX2 axis cleanly.
 
    **ARM attempt:** an AWS t4g.small (Graviton2 ARM, 2 vCPUs, 2 GB RAM)
    was launched in parallel but could not complete the Docker build —

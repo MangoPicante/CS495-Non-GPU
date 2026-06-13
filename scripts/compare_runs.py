@@ -779,10 +779,31 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
         qwen_q2_df=qwen_q2_df,
         gemma_q8_df=gemma_q8_df, gemma_q4_df=gemma_q4_df, gemma_q2_df=gemma_q2_df,
     )
-    fig = plt.figure(figsize=(13, max(9, len(labels) * 0.55 + 4)))
-    gs = fig.add_gridspec(2, 1, height_ratios=[len(labels) * 0.55, 4.5], hspace=0.35)
-    ax_main = fig.add_subplot(gs[0])
-    ax_cfg  = fig.add_subplot(gs[1])
+    # Per-config panel needs >=2 measured configs to be useful.  After the
+    # 2026-06-13 single-config bench reduction, most CSVs only contain
+    # (512, 128) (+ optional (512, 0) pp512), so a per-config panel would
+    # render with 1-2 empty columns.  Detect this and skip panel (b) when
+    # no model has data for both (512, 512) and (1, 512).
+    def _has_secondary_configs(df):
+        if df is None or df.empty or "n_prompt" not in df.columns:
+            return False
+        configs = {(int(r.n_prompt), int(r.n_gen))
+                   for r in df.itertuples()
+                   if r.n_prompt and r.n_gen}
+        return (512, 512) in configs and (1, 512) in configs
+
+    has_secondary = any(_has_secondary_configs(d) for d in
+                        (local_df, qwen_q8_df, qwen_q4_df, qwen_q2_df,
+                         gemma_q8_df, gemma_q4_df, gemma_q2_df))
+
+    if has_secondary:
+        fig = plt.figure(figsize=(13, max(9, len(labels) * 0.55 + 4)))
+        gs = fig.add_gridspec(2, 1, height_ratios=[len(labels) * 0.55, 4.5], hspace=0.35)
+        ax_main = fig.add_subplot(gs[0])
+        ax_cfg  = fig.add_subplot(gs[1])
+    else:
+        fig, ax_main = plt.subplots(figsize=(13, max(5.5, len(labels) * 0.55 + 1.5)))
+        ax_cfg = None
 
     # ── (a) Cross-model comparison at (512, 128) ─────────────────────────
     max_val = max(v for v in values if v) or 1
@@ -800,65 +821,71 @@ def plot_throughput(local_df: pd.DataFrame, out_dir: Path,
     for b in _family_boundaries(labels):
         ax_main.axhline(b - 0.5, color="#888888", linewidth=0.8,
                         linestyle="--", alpha=0.6)
+    # Legend goes OUTSIDE axes so it never occludes bar value labels.
     ax_main.legend(
         handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df,
                                 gemma_q8_df, gemma_q4_df, gemma_q2_df),
-        loc="upper right", fontsize=8,
+        loc="upper left", bbox_to_anchor=(1.02, 1.0),
+        fontsize=8, frameon=True, framealpha=0.95,
+        handlelength=1.4, handletextpad=0.5, labelspacing=0.4,
+        borderpad=0.4, borderaxespad=0.0,
     )
 
-    # ── (b) Per-config sensitivity for the locally measured models ───────
-    configs = [(512, 128), (512, 512), (1, 512)]
-    config_labels = [f"p={p} / g={g}" for p, g in configs]
-    series = []
-    if has_q8:
-        series.append(("Qwen2.5-1.5B Q8_0",    qwen_q8_df,  QWEN_Q8_COLOR))
-    if has_q4:
-        series.append(("Qwen2.5-1.5B Q4_K_M",  qwen_q4_df,  QWEN_Q4_COLOR))
-    if has_q2:
-        series.append(("Qwen2.5-1.5B Q2_K",    qwen_q2_df,  QWEN_Q2_COLOR))
-    if has_gemma_q8:
-        series.append(("Gemma-2-2B-it Q8_0",   gemma_q8_df, GEMMA_Q8_COLOR))
-    if has_gemma_q4:
-        series.append(("Gemma-2-2B-it Q4_K_M", gemma_q4_df, GEMMA_Q4_COLOR))
-    if has_gemma_q2:
-        series.append(("Gemma-2-2B-it Q2_K",   gemma_q2_df, GEMMA_Q2_COLOR))
-    if has_b:
-        series.append(("BitNet b1.58 2B4T",    local_df,    BITNET_COLOR))
+    # ── (b) Per-config sensitivity (only when secondary configs exist) ───
+    if ax_cfg is not None:
+        configs = [(512, 128), (512, 512), (1, 512)]
+        config_labels = [f"p={p} / g={g}" for p, g in configs]
+        series = []
+        if has_q8:
+            series.append(("Qwen2.5-1.5B Q8_0",    qwen_q8_df,  QWEN_Q8_COLOR))
+        if has_q4:
+            series.append(("Qwen2.5-1.5B Q4_K_M",  qwen_q4_df,  QWEN_Q4_COLOR))
+        if has_q2:
+            series.append(("Qwen2.5-1.5B Q2_K",    qwen_q2_df,  QWEN_Q2_COLOR))
+        if has_gemma_q8:
+            series.append(("Gemma-2-2B-it Q8_0",   gemma_q8_df, GEMMA_Q8_COLOR))
+        if has_gemma_q4:
+            series.append(("Gemma-2-2B-it Q4_K_M", gemma_q4_df, GEMMA_Q4_COLOR))
+        if has_gemma_q2:
+            series.append(("Gemma-2-2B-it Q2_K",   gemma_q2_df, GEMMA_Q2_COLOR))
+        if has_b:
+            series.append(("BitNet b1.58 2B4T",    local_df,    BITNET_COLOR))
 
-    x = np.arange(len(configs))
-    width = 0.8 / max(len(series), 1)
-    offsets = np.linspace(-(len(series) - 1) * width / 2,
-                          (len(series) - 1) * width / 2, len(series))
-    all_vals: list[float] = []
-    for idx, (name, df, color) in enumerate(series):
-        vals = []
-        for p, g in configs:
-            row = df[(df["n_prompt"] == p) & (df["n_gen"] == g)]
-            v = float(row["throughput_tokens_s"].median()) if not row.empty else 0.0
-            vals.append(v)
-        all_vals.extend(vals)
-        ax_cfg.bar(x + offsets[idx], vals, width, label=name, color=color)
-    y_top = max(all_vals) * 1.18 if all_vals else 1
-    for idx, (name, df, color) in enumerate(series):
-        vals = []
-        for p, g in configs:
-            row = df[(df["n_prompt"] == p) & (df["n_gen"] == g)]
-            v = float(row["throughput_tokens_s"].median()) if not row.empty else 0.0
-            vals.append(v)
-        for xi, v in zip(x + offsets[idx], vals):
-            if v > 0:
-                ax_cfg.text(xi, v + y_top * 0.015, f"{v:.1f}",
-                            ha="center", fontsize=8)
-    ax_cfg.set_xticks(x)
-    ax_cfg.set_xticklabels(config_labels)
-    ax_cfg.set_ylabel("Throughput (tokens/s)")
-    ax_cfg.set_ylim(0, y_top)
-    ax_cfg.set_title("(b) Per-config sensitivity (locally measured models)", loc="left")
-    ax_cfg.legend(loc="upper right", fontsize=8)
-    ax_cfg.grid(axis="y", alpha=0.3)
+        x = np.arange(len(configs))
+        width = 0.8 / max(len(series), 1)
+        offsets = np.linspace(-(len(series) - 1) * width / 2,
+                              (len(series) - 1) * width / 2, len(series))
+        all_vals: list[float] = []
+        for idx, (name, df, color) in enumerate(series):
+            vals = []
+            for p, g in configs:
+                row = df[(df["n_prompt"] == p) & (df["n_gen"] == g)]
+                v = float(row["throughput_tokens_s"].median()) if not row.empty else 0.0
+                vals.append(v)
+            all_vals.extend(vals)
+            ax_cfg.bar(x + offsets[idx], vals, width, label=name, color=color)
+        y_top = max(all_vals) * 1.18 if all_vals else 1
+        for idx, (name, df, color) in enumerate(series):
+            vals = []
+            for p, g in configs:
+                row = df[(df["n_prompt"] == p) & (df["n_gen"] == g)]
+                v = float(row["throughput_tokens_s"].median()) if not row.empty else 0.0
+                vals.append(v)
+            for xi, v in zip(x + offsets[idx], vals):
+                if v > 0:
+                    ax_cfg.text(xi, v + y_top * 0.015, f"{v:.1f}",
+                                ha="center", fontsize=8)
+        ax_cfg.set_xticks(x)
+        ax_cfg.set_xticklabels(config_labels)
+        ax_cfg.set_ylabel("Throughput (tokens/s)")
+        ax_cfg.set_ylim(0, y_top)
+        ax_cfg.set_title("(b) Per-config sensitivity (locally measured models)", loc="left")
+        ax_cfg.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0),
+                      fontsize=8, frameon=True)
+        ax_cfg.grid(axis="y", alpha=0.3)
 
     fig.suptitle(
-        "Inference Throughput: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines (CPU)",
+        "Inference Throughput: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines (CPU)",
         fontsize=13,
     )
     fig.tight_layout()
@@ -1044,7 +1071,9 @@ def plot_cross_arch_throughput(out_dir: Path):
             max_y = max(max_y, max(ys))
 
     ax.set_xticks(x)
-    ax.set_xticklabels(models)
+    # Long model labels overlap horizontally — rotate 25° and right-anchor
+    # so they slope off below the axis without colliding.
+    ax.set_xticklabels(models, rotation=25, ha="right", fontsize=9)
     ax.set_ylabel("Throughput (tokens/s)")
     ax.set_title(
         "Cross-architecture throughput at n_prompt=512, n_gen=128\n"
@@ -1093,20 +1122,22 @@ def plot_memory(local_df: pd.DataFrame, out_dir: Path,
     ax.set_xlabel("Peak RSS (MB)")
     ax.set_title("Peak Memory: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines\n"
                  "(n_prompt=512, n_gen=128, CPU)")
-    ax.set_xlim(0, max_val * 1.18)
+    ax.set_xlim(0, max_val * 1.22)  # extra room so value labels don't kiss the right edge
     ax.invert_yaxis()
     # Family separators between BitNet / Qwen / Gemma groups.
     for b in _family_boundaries(labels):
         ax.axhline(b - 0.5, color="#888888", linewidth=0.8,
                    linestyle="--", alpha=0.6)
-    # Compact legend — full color-coded labels are redundant with the
-    # row labels on the left, so a tight legend lets the bars own the canvas.
+    # Legend goes OUTSIDE the axes (right of plot) so it can never occlude
+    # bar value labels — previously the in-axes legend at lower-right ate
+    # the "2,662 MB" Gemma Q4_K_M label.
     ax.legend(
         handles=_legend_handles(qwen_q8_df, qwen_q4_df, qwen_q2_df,
                                 gemma_q8_df, gemma_q4_df, gemma_q2_df),
-        loc="lower right", fontsize=6.5, frameon=True,
-        framealpha=0.85, handlelength=1.2, handletextpad=0.4,
-        labelspacing=0.25, borderpad=0.3, borderaxespad=0.3,
+        loc="upper left", bbox_to_anchor=(1.02, 1.0),
+        fontsize=8, frameon=True, framealpha=0.95,
+        handlelength=1.4, handletextpad=0.5, labelspacing=0.4,
+        borderpad=0.4, borderaxespad=0.0,
     )
     fig.tight_layout()
     path = out_dir / "memory_comparison.png"
@@ -1243,7 +1274,11 @@ def _accuracy_scatter(
         print(f"Skipping {filename}: no rows with {x_col} + {y_metric} data.")
         return
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Wider canvas: 10×6 was clipping the two-line title at left edge and
+    # forcing point labels into the legend's column on the right.  12×6.5
+    # gives the title room and leaves slack for label staggers around the
+    # BitNet / Qwen-Q4 / Gemma-Q4 cluster.
+    fig, ax = plt.subplots(figsize=(12, 6.5))
 
     QWEN_OURS_NAME    = "Qwen2.5-1.5B-Instruct Q8_0"
     QWEN_Q4_OURS_NAME = "Qwen2.5-1.5B-Instruct Q4_K_M"
@@ -1258,6 +1293,14 @@ def _accuracy_scatter(
         (row["model"], row["source"]): (row[x_col], row["_y"])
         for _, row in plot_df.iterrows()
     }
+    # Midpoint of x-range used to steer paper labels AWAY from the nearer
+    # plot edge.  cost_accuracy and memory_accuracy put Qwen FP16 paper
+    # at the rightmost marker (label must go LEFT to avoid right-edge
+    # clipping); speed_accuracy puts it at the leftmost marker because
+    # FP16 is slow (label must go RIGHT instead).  Hard-coding the
+    # direction per offset map clips in whichever plot we didn't tune for.
+    _x_vals = pd.to_numeric(plot_df[x_col], errors="coerce").dropna()
+    _x_mid = (_x_vals.min() + _x_vals.max()) / 2 if not _x_vals.empty else 0
     # Dotted connectors visualize the paper→ours or quant-chain delta.
     # Qwen chain: FP16 paper → Q8 → Q4 → Q2 (ours).
     # Gemma chain: Q8 → Q4 → Q2 (ours) — no paper FP16 baseline available.
@@ -1315,30 +1358,79 @@ def _accuracy_scatter(
 
         # Paper annotations use the full model name to match the naming
         # convention in the CSV and other plots.  Our-measurement annotations
-        # stay abbreviated and keep the quant suffix so each variant is
-        # distinguishable at a glance.
+        # are kept SHORT (drop "_0", "_K_M", "_K" suffixes — the legend
+        # already disambiguates) so labels don't overlap in clusters.
         if is_ours:
             ann = (model
                    .replace(" b1.58 2B4T", "")
                    .replace("Qwen2.5-1.5B-Instruct ", "Qwen ")
-                   .replace("Gemma-2-2B-it ", "Gemma ")) + " (ours)"
+                   .replace("Gemma-2-2B-it ", "Gemma ")
+                   .replace(" Q8_0", " Q8")
+                   .replace(" Q4_K_M", " Q4")
+                   .replace(" Q2_K", " Q2")) + " (ours)"
         else:
-            ann = model.replace(" (FP16)", "") + " (paper)"
+            # Shorten paper labels to match the ours-side abbreviation —
+            # the legend already carries the full model name, so the
+            # annotation only needs to distinguish row identity.
+            ann = (model.replace(" (FP16)", "")
+                        .replace("BitNet b1.58 2B4T", "BitNet")
+                        .replace("Qwen2.5 1.5B", "Qwen 1.5B")) + " (paper)"
         # Stagger ours offsets so co-located points don't overlap.
+        # Each variant gets a distinct quadrant + vertical slot relative
+        # to its marker so labels never share screen real estate when
+        # markers cluster (very common in cost_accuracy / memory_accuracy
+        # near the Q4–Q8 high-accuracy band).  Horizontal offsets are
+        # tuned to the shortened label set ("Qwen Q4 (ours)" etc.) — keep
+        # in sync with the ann construction above.
+        #   BitNet (paper) → UP, slight right (BitNet paper sits at the
+        #                    plot's left edge — left offsets clip)
+        #   Qwen FP16 paper → UP-LEFT (Qwen FP16 sits at right edge —
+        #                     right offsets clip)
+        #   BitNet (ours)  → UP-RIGHT
+        #   Qwen Q8 (ours) → DOWN-RIGHT
+        #   Qwen Q4 (ours) → DOWN-RIGHT, further below Q8 + BitNet-ours
+        #   Qwen Q2 (ours) → DOWN-RIGHT (standalone)
+        #   Gemma Q8 (ours) → UP-LEFT
+        #   Gemma Q4 (ours) → DOWN-LEFT
+        #   Gemma Q2 (ours) → DOWN-LEFT (standalone)
         if is_qwen_q2_ours:
-            xy_offset = (8, -34)
+            xy_offset = (10, -14)
         elif is_qwen_q4_ours:
-            xy_offset = (8, -22)
+            xy_offset = (10, -32)
+        elif is_qwen_q8_ours:
+            xy_offset = (10, -16)
         elif is_gemma_q2_ours:
-            xy_offset = (-90, -34)
+            xy_offset = (-95, -14)
         elif is_gemma_q4_ours:
-            xy_offset = (-90, -22)
+            xy_offset = (-95, -16)
         elif is_gemma_q8_ours:
-            xy_offset = (-90, -10)
+            xy_offset = (-95, 12)
         elif is_ours:
-            xy_offset = (8, -10)
+            # BitNet — UP-LEFT of its marker, occupying the empty space
+            # between BitNet-paper (up-left at higher y) and Qwen-Q2
+            # (down-left at much lower y).  Right side of BitNet marker
+            # is owned by Qwen Q4 / Q8 (ours) labels, which is why a
+            # left offset is necessary even though the legend is on
+            # the right of the figure.
+            xy_offset = (-65, 8)
+        elif "BitNet" in model:
+            # BitNet paper baseline.  Edge-aware: if it's on the LEFT
+            # half of x-range (cost / memory plots), go UP-RIGHT so the
+            # label doesn't clip left.  On the RIGHT half (speed plot —
+            # BitNet is the fastest model so its paper marker is at
+            # high x), go UP-LEFT instead.
+            if row[x_col] >= _x_mid:
+                xy_offset = (-95, 12)
+            else:
+                xy_offset = (5, 12)
         else:
-            xy_offset = (8, 6)
+            # FP16 paper baseline for the bigger Qwen-family.  Edge-
+            # aware: at the rightmost x in cost / memory plots go LEFT;
+            # at the leftmost x in speed plot (FP16 is slow) go RIGHT.
+            if row[x_col] >= _x_mid:
+                xy_offset = (-105, 8)
+            else:
+                xy_offset = (8, 8)
         ax.annotate(ann, (row[x_col], row["_y"]),
                     textcoords="offset points", xytext=xy_offset, fontsize=8)
 
@@ -1347,7 +1439,16 @@ def _accuracy_scatter(
     for h, l in zip(handles, labels_list):
         if l and l not in seen:
             seen[l] = h
-    ax.legend(seen.values(), seen.keys(), fontsize=9, loc=legend_loc)
+    # Move legend outside the axes to the right so it never overlaps
+    # the clustered (BitNet / Qwen Q4 / Gemma Q4) markers.
+    ax.legend(seen.values(), seen.keys(), fontsize=9,
+              loc="upper left", bbox_to_anchor=(1.02, 1.0),
+              borderaxespad=0)
+
+    # Pad axes so annotation labels offset below/left of points don't
+    # clip out of frame.  "Qwen Q2_K (ours)" sits below its marker
+    # (offset -34 pt) and was being cut off at the x-axis.
+    ax.margins(x=0.18, y=0.12)
 
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
@@ -1368,7 +1469,7 @@ def plot_cost_accuracy(df: pd.DataFrame, out_dir: Path, hardware_rate: float):
         x_col="cost_per_1k_tokens", y_metric="mean_acc",
         x_label=x_label,
         y_label="Mean accuracy across 5 benchmarks (%)",
-        title="Cost–Accuracy Trade-off: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
+        title="Cost–Accuracy Trade-off: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines\n"
               "(mean of ARC-Easy, ARC-Challenge, WinoGrande, HellaSwag, MMLU;  "
               "hollow ○ = paper,  filled ♦ = ours)",
         filename="cost_accuracy.png",
@@ -1390,9 +1491,7 @@ def plot_speed_accuracy(df: pd.DataFrame, out_dir: Path):
         x_label="Throughput tg128 (tokens/s) at n_prompt=512, n_gen=128",
         y_label="Mean accuracy across 5 benchmarks (%)",
         title="Speed–Accuracy Trade-off: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines\n"
-              "(throughput at the (512, 128) reference config;  "
-              "mean accuracy across ARC-E/ARC-C/Wino/HellaSwag/MMLU;  "
-              "hollow ○ = paper,  filled ♦ = ours)",
+              "(mean of ARC-E, ARC-C, WinoGrande, HellaSwag, MMLU;  hollow ○ = paper,  filled ♦ = ours)",
         filename="speed_accuracy.png",
         legend_loc="lower right",
     )
@@ -1566,7 +1665,10 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
 
     entries.sort(key=lambda e: e[1])  # cheapest at top after invert_yaxis
 
-    fig, ax = plt.subplots(figsize=(12, max(5, len(entries) * 0.45)))
+    # Widen significantly: long row labels (e.g. "Qwen2.5-1.5B Q4_K_M
+    # (ours, local electricity)") + dollar value labels on the right +
+    # legend outside need ~16 inches to avoid clipping.
+    fig, ax = plt.subplots(figsize=(16, max(5, len(entries) * 0.45)))
     for i, (label, cost, color, hatch) in enumerate(entries):
         ax.barh(i, cost, color=color, hatch=hatch,
                 edgecolor="#444444" if hatch else "#cccccc", linewidth=0.5)
@@ -1657,7 +1759,10 @@ def plot_cloud_cost_comparison(local_df: pd.DataFrame,
                           label="Cloud API (output token price)"))
     # "center right" sits between the short (top) and long (bottom) bars at
     # the log-scale's right edge, where there's no bar competition either way.
-    ax.legend(handles=handles, loc="center right", fontsize=8)
+    # Legend outside the plot — was previously overlapping the right-side
+    # value labels at "center right".
+    ax.legend(handles=handles, loc="upper left",
+              bbox_to_anchor=(1.02, 1.0), fontsize=8, frameon=True)
 
     fig.tight_layout()
     path = out_dir / "cloud_cost_comparison.png"
@@ -1681,7 +1786,7 @@ def plot_memory_accuracy(df: pd.DataFrame, out_dir: Path):
         x_col="peak_rss_mb", y_metric="mean_acc",
         x_label="Peak RSS (MB) — lower is better",
         y_label="Mean accuracy across 5 benchmarks (%)",
-        title="Memory–Accuracy: BitNet b1.58 2B4T & Qwen2.5 1.5B vs FP16 Baselines\n"
+        title="Memory–Accuracy: BitNet b1.58 2B4T, Qwen2.5 1.5B & Gemma-2 2B vs FP16 Baselines\n"
               "(mean of ARC-Easy, ARC-Challenge, WinoGrande, HellaSwag, MMLU;  "
               "hollow ○ = paper,  filled ♦ = ours)",
         filename="memory_accuracy.png",
@@ -1988,7 +2093,7 @@ def plot_mmlu_subject_heatmap(
 
     total_subjects = len(all_subjects)
     ax.set_title(
-        "MMLU Per-Subject Accuracy: BitNet b1.58 2B4T vs Qwen2.5 1.5B\n"
+        "MMLU Per-Subject Accuracy: BitNet b1.58 2B4T vs Qwen2.5 1.5B vs Gemma-2 2B\n"
         f"({n_subj}/{total_subjects} subjects with cross-model spread "
         f"≥ {SPREAD_THRESHOLD:.0f}pp, sorted by spread — 5-shot)",
         pad=20,
@@ -2117,7 +2222,10 @@ def plot_accuracy_eval_cost(
     for b in _family_boundaries([s[0] for s in series]):
         ax.axhline(b - 0.5, color="#888888", linewidth=0.8,
                    linestyle="--", alpha=0.6)
-    ax.legend(loc="lower right", fontsize=8, title="Benchmark")
+    # Legend outside the axes — was previously eating the "12.8 h" value
+    # label on Gemma Q2_K's bar at lower-right.
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0),
+              fontsize=8, title="Benchmark", frameon=True)
 
     # Twin x-axis: avg kWh/hour ratio gives an approximate energy scale.
     # CPU-bound inference ⇒ power ≈ constant, so this is close to exact in
