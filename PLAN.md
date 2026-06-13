@@ -247,8 +247,13 @@ apples-to-apples with the cross-arch throughput sweep, and BitNet's TL2
 kernel requires ubatch ≤ 64 at 2 threads.  Override per-invocation with
 `make eval-accuracy EVAL_THREADS=4 EVAL_UBATCH=128` if you want the
 4-thread / wider-batch path instead.  Benchmarks (`make benchmark*`)
-remain on `THREADS=4 UBATCH=128` — those are separate Makefile
-variables.
+default to `THREADS=4 UBATCH=128` in the Makefile (historical), but
+**all canonical reported numbers in REPORT.md were measured at
+`THREADS=2 UBATCH=64`** to match the accuracy-eval / AWS Free Tier
+condition.  Reproducing those numbers requires
+`make benchmark THREADS=2 UBATCH=64` (or rerunning per-model targets
+with the same override).  See PLAN-history note Phase 6.5 for the
+threads=4 → threads=2 standardization rationale.
 
 ### 6. Plots and comparison table
 

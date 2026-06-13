@@ -16,26 +16,31 @@ hardware.
 
 ## Headline finding
 
-Reference workload: `n_prompt=512`, `n_gen=128`, 4 threads on an Intel
-i5-9400F. Full details (methodology, threats to validity, plots) in
-[`REPORT.md`](REPORT.md).
+Reference workload: `n_prompt=512`, `n_gen=128`, **2 threads** on an
+Intel i5-9400F (matches the AWS Free Tier `c7i-flex.large` cross-arch
+condition; see [`REPORT.md`](REPORT.md) for methodology, threats to
+validity, and plots).
 
 | Metric | BitNet | Qwen Q8_0 | Qwen Q4_K_M | Qwen Q2_K | Gemma Q8_0 | Gemma Q4_K_M | Gemma Q2_K |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Throughput (tok/s) | 21.2 | 15.1 | 24.9 | **32.5** | 9.5 | 14.2 | 18.4 |
-| Peak RSS (MB) | 1,247 | 1,667 | 1,632 | **745** | 2,776 | 2,671 | 1,293 |
+| Throughput (tok/s) | 17.8 | 13.4 | 17.6 | **20.3** | 8.0 | 9.3 | 11.7 |
+| Peak RSS (MB) | 1,240 | 1,659 | 1,624 | **737** | 2,766 | 2,662 | 1,283 |
 | Mean accuracy across 5 tasks (%) | 61.74 | **63.58** | 61.86 | 52.21 | 63.41 | 63.28 | 57.99 |
-| Cost: AWS c5.xlarge proxy ($/1k tok) | 0.00223 | 0.00313 | 0.00190 | **0.00145** | 0.00497 | 0.00332 | 0.00256 |
-| Cost: local electricity ($/1k tok) | **0.000131** | 0.000224 | 0.000132 | 0.000162 | 0.000334 | 0.000208 | 0.000255 |
+| Cost: AWS c5.xlarge proxy ($/1k tok) | 0.00265 | 0.00353 | 0.00269 | **0.00232** | 0.00591 | 0.00507 | 0.00403 |
+| Cost: local electricity ($/1k tok) | **0.000202** | 0.000339 | 0.000217 | 0.000304 | 0.000536 | 0.000386 | 0.000494 |
 
-The original three models (BitNet, Q8, Q4) traced a clean speed/accuracy
-Pareto where **BitNet matched Q8's accuracy at near-Q4 speed** while
-winning memory and reasoning tasks (WinoGrande +9–12pt over Qwen). The
-recent Q2 / Gemma expansion adds three findings:
+The original three models (BitNet, Q8, Q4) trace a speed/accuracy Pareto
+where **BitNet sits at Qwen-Q4 speed** (17.8 vs 17.6 tok/s, essentially
+tied) with accuracy between Q4 and Q8 (61.74% vs Q4's 61.86% and Q8's
+63.58%) while winning every reasoning task — WinoGrande +3 to +16pt
+over the three Qwen quants. The Q2 / Gemma expansion adds three
+findings:
 
-- **Qwen Q2_K** is the throughput / memory / AWS-rental-cost leader by
-  large margins (~30% over Q4 on speed; ~40% over BitNet on RSS) — pending
-  the accuracy eval that will say whether the deeper quantization holds up.
+- **Qwen Q2_K** is the throughput / memory / AWS-rental-cost leader,
+  but no longer by huge margins after the threads=2 standardization
+  (~16% over Q4 on speed at this condition; ~40% over BitNet on RSS).
+  The accuracy eval since shows Q2 *collapses* 11.4pt vs Q8 — the
+  speed/cost win is real but comes with a steep capability cost.
 - **Gemma 2 2B is dramatically more quantization-robust than Qwen 1.5B.**
   Gemma Q4_K_M matches Gemma Q8_0 within sampling noise (63.28% vs
   63.41% mean) — Q4 is essentially free on Gemma. Qwen Q4_K_M loses
@@ -45,13 +50,17 @@ recent Q2 / Gemma expansion adds three findings:
   BitNet and approaching random-guess territory on the hardest tasks.
   Larger parameter count + family-specific K-quant calibration both
   contribute.
-- **Pareto winner among rows with full accuracy data: Gemma Q4_K_M.**
-  63.28% mean (essentially tied with the best row, Qwen Q8 at 63.58%)
-  at 14.2 tok/s and 2.67 GB RSS, $0.00332 AWS proxy / $0.000208 local
-  electricity.  Best accuracy per dollar in the project.
+- **Accuracy-per-dollar leader: BitNet.** 61.74% mean at $0.00265 AWS
+  proxy / $0.000202 local electricity — both the highest accuracy/cost
+  ratio in the table and the cheapest electricity row outright.  Qwen
+  Q8 wins absolute accuracy (63.58%), but at 33% higher AWS cost and
+  68% higher electricity cost than BitNet for +1.84pt — a steep
+  efficiency tradeoff.  Gemma Q4_K_M (previously the Pareto winner at
+  threads=4) is now dominated by Qwen Q8 at this condition: Qwen Q8 is
+  cheaper *and* more accurate.
 - **Cost picture is uneven across families.** Gemma is the slowest
-  model at every quant (9.5 / 14.2 / 18.4 tok/s vs Qwen 15.1 / 24.9 /
-  32.5) and the heaviest at Q8/Q4 (~2.7 GB RSS, 2.2× BitNet) — Gemma's
+  model at every quant (8.0 / 9.3 / 11.7 tok/s vs Qwen 13.4 / 17.6 /
+  20.3) and the heaviest at Q8/Q4 (~2.7 GB RSS, 2.2× BitNet) — Gemma's
   2B parameter count vs Qwen's 1.5B explains the consistent throughput
   / memory gap.  Q2_K's K-quant tensor sharing collapses Gemma's
   memory penalty (1.3 GB, within 4% of BitNet) — but at the 5.4pt
@@ -156,7 +165,10 @@ All commands run from the repo root. The most common targets:
 
 ```bash
 # Inference throughput / memory / energy (writes results/*_step_metrics.csv)
-make benchmark             # All seven models at THREADS=4
+make benchmark             # All seven models. Canonical reported numbers
+                           # were measured at THREADS=2 UBATCH=64 (matches
+                           # accuracy evals + AWS Free Tier c7i-flex.large);
+                           # override via `make benchmark THREADS=2 UBATCH=64`.
 
 # Accuracy evaluation (writes results/accuracy_results_*.json)
 make eval-accuracy         # All seven models, all five tasks, LIMIT=500
@@ -181,8 +193,8 @@ make plots                 # → results/comparison_table.csv + results/plots/*.
                            # tier headline lives there.
 
 # Override the hardware rate to test cost-model sensitivity (Phase 5):
-poetry run python scripts/compare_runs.py --hardware-rate 0.05   # spot c5.xlarge
-poetry run python scripts/compare_runs.py --hardware-rate 0.1156 # ARM Graviton c7g.xlarge
+poetry run python scripts/compare_runs.py --hardware-rate 0.05         # spot c5.xlarge
+poetry run python scripts/compare_runs.py --hardware-rate 0.085        # c7i-flex.large (actually measured arch)
 # Ordering of comparison_table.csv rows by $/1k tok is invariant across rates.
 
 # Phase 5 sensitivity sweeps
@@ -217,8 +229,9 @@ CS495-Non-GPU/
     └── plots/                   # PNGs generated by compare_runs.py
 ```
 
-External (not in this repo): `../Models/BitNet/` and `../Models/Qwen/`,
-created and populated by the `make bitnet-setup` / `qwen-q8-setup` targets.
+External (not in this repo): `../Models/BitNet/`, `../Models/Qwen/`, and
+`../Models/Gemma/` — created and populated by the `make bitnet-setup`,
+`qwen-q8-setup`, and `gemma-q*-model` targets.
 
 ---
 
